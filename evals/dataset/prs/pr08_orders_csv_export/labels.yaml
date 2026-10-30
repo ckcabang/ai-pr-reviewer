@@ -18,7 +18,7 @@ issues:
     area: security
     severity: high
     rule_id: R1
-    requires: rules
+    requires: diff
     description: >-
       The new CSV export endpoint has no auth.get_current_user dependency (and no admin check), so
       anyone can call it without logging in and download every customer's orders (user ids, statuses,
