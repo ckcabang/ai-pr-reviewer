@@ -115,12 +115,30 @@ def summarize_arm(arm: str, records: list[dict], dataset_list: list[dict]) -> di
     summary["recall_by_area"] = {k: agg(r["recall_by_area"][k] for r in runs) for k in AREAS}
     summary["errors"] = {"review": sum(r["status"] == "error" for r in mine),
                          "judge": sum(r["status"] == "judge_error" for r in mine)}
+    summary["degraded"] = _degraded(mine)
     summary["review_cost_usd"] = sum(r["stats"].get("totals", {}).get("cost_usd", 0.0)
                                      for r in mine if "stats" in r)
     summary["judge_cost_usd"] = sum(r["judge"]["cost_usd"] for r in scored)
     summary["per_pr"] = _per_pr(scored, dataset_list)
     summary["runs"] = runs
     return summary
+
+
+def _degraded(records: list[dict]) -> dict:
+    """Reviews that came back but with a stage down: `specialists` {name: reviews where it failed},
+    `verifier` (reviews where it failed outright or for some batches, so findings went unchecked),
+    `reviews` (reviews with any of these). They stay in the metrics; this makes them visible."""
+    specialists: dict[str, int] = {}
+    verifier = degraded = 0
+    for r in records:
+        stats = r.get("stats") or {}
+        failed = sorted(stats.get("specialist_failures") or {})
+        v_bad = (stats.get("stages", {}).get("verifier", {}).get("status") in ("failed", "partial"))
+        for name in failed:
+            specialists[name] = specialists.get(name, 0) + 1
+        verifier += v_bad
+        degraded += bool(failed) or v_bad
+    return {"specialists": specialists, "verifier": verifier, "reviews": degraded}
 
 
 def _per_pr(scored: list[dict], dataset_list: list[dict]) -> dict:

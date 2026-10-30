@@ -128,6 +128,17 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
 
+def degraded_text(arm: str, degraded: dict) -> str | None:
+    """A stage-down warning for one arm, or None. These reviews are still scored, so say what may be missing."""
+    if not degraded["reviews"]:
+        return None
+    parts = [f"{name} failed in {_plural(n, 'review')}" for name, n in sorted(degraded["specialists"].items())]
+    if degraded["verifier"]:
+        parts.append(f"the verifier failed in {_plural(degraded['verifier'], 'review')} (findings went unchecked)")
+    return (f"{arm}: {_plural(degraded['reviews'], 'review')} ran with a stage down ({'; '.join(parts)}). "
+            "They are kept in the numbers, which may understate what the arm finds.")
+
+
 # ---------------------------------------------------------------- charts
 
 def _grouped_bars(groups: list[tuple[str, list[dict | None]]], arms: list[str], *, pct: bool, aria: str) -> str:
@@ -435,6 +446,8 @@ def _method(results: dict, summary: dict, arms: list[str]) -> str:
     errs = [(a, s["errors"]) for a, s in summary.items() if any(s["errors"].values())]
     err_line = "".join(f"<li class='warn'>{_e(a)}: {_plural(e['review'], 'review error')} and "
                        f"{_plural(e['judge'], 'judge error')} left out of the metrics.</li>" for a, e in errs)
+    err_line += "".join(f"<li class='warn'>{_e(t)}</li>" for a, s in summary.items()
+                        if (t := degraded_text(a, s["degraded"])))
     return (
         '<section id="method"><h2>Methodology and limitations</h2><ul>'
         f"<li><b>Dataset:</b> {len(ds)} PRs ({n_clean} clean) with {n_issues} expected issues, each reviewed against "
@@ -474,6 +487,8 @@ def render_html(results: dict) -> str:
         f"<p class='warn'>{_e(arm)}: {_plural(s['errors']['review'], 'review error')} and "
         f"{_plural(s['errors']['judge'], 'judge error')} are left out of the numbers below.</p>"
         for arm, s in summary.items() if any(s["errors"].values()))
+    warnings += "".join(f"<p class='warn'>{_e(t)}</p>" for arm, s in summary.items()
+                        if (t := degraded_text(arm, s["degraded"])))
     body = "".join([
         f'<h1>Review eval scorecard</h1><p class="sub">{len(arms)} arms · {_plural(results["config"]["runs"], "run")} · '
         f'{_plural(len(results["dataset"]), "PR")} ({sum(d["is_clean"] for d in results["dataset"])} clean) · '
