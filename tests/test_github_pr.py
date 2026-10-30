@@ -279,14 +279,15 @@ def test_without_post_nothing_is_written_to_github(repo, config_path, github):
 
 
 def test_post_submits_exactly_one_comment_review_for_the_head_commit_with_inline_comments(
-        repo, config_path, github, capsys):
-    assert run_pr(repo, config_path, github, "--post") == 0
+        repo, config_path, github, capsys, keep_all):
+    provider = FakeProvider({"correctness": {"findings": [FINDING]}, "verifier": keep_all})
+    assert run_pr(repo, config_path, github, "--post", provider=provider) == 0
 
     [review] = github.posts()
     assert set(review) == {"commit_id", "body", "event", "comments"}
     assert review["event"] == "COMMENT"
     assert review["commit_id"] == github.pull["head"]["sha"]
-    assert review["body"].startswith("# AI Review: 0 action required · 1 recommended")
+    assert review["body"].startswith("# AI Review: 1 action required · 0 recommended")
     [comment] = review["comments"]
     assert (comment["path"], comment["line"], comment["side"]) == ("a.py", 2, "RIGHT")
     assert "Overwrites x" in comment["body"] and "x is clobbered." in comment["body"]

@@ -73,3 +73,17 @@ def config() -> Config:
     cfg = load_config()
     cfg.cache.enabled = False
     return cfg
+
+
+@pytest.fixture
+def keep_all():
+    """A fake-verifier script that keeps every finding it is shown, at its proposed values."""
+    import re
+
+    block = re.compile(r'<finding id="([^"]+)">.*?^severity: (\w+)\nconfidence: ([\d.]+)$', re.S | re.M)
+
+    def script(call):
+        return {"verdicts": [{"id": i, "verdict": "keep", "confidence": float(c), "severity": s}
+                             for i, s, c in block.findall(call.user)]}
+
+    return script

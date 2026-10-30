@@ -15,7 +15,9 @@ from reviewer.agents.correctness import CORRECTNESS
 from reviewer.config import Config
 from reviewer.diff import parse_diff
 from reviewer.llm import Provider, Usage
-from reviewer.models import SEVERITY_ORDER, ReviewInput, ReviewResult, VerifiedFinding
+from reviewer.models import SEVERITY_ORDER, ReviewInput, ReviewResult
+from reviewer.triage import triage
+from reviewer.verifier import run_verifier, skip_verifier
 
 log = logging.getLogger("reviewer")
 
@@ -30,7 +32,8 @@ class AllSpecialistsFailed(ReviewError):
     """Every specialist failed, so there is no review to show."""
 
 
-def review(review_input: ReviewInput, *, provider: Provider, config: Config) -> ReviewResult:
+def review(review_input: ReviewInput, *, provider: Provider, config: Config, verify: bool = True) -> ReviewResult:
+    """`verify=False` skips the verifier (ablation): every finding keeps its own confidence."""
     started = time.perf_counter()
     files = parse_diff(review_input.diff)
     if not files:
@@ -67,13 +70,55 @@ def review(review_input: ReviewInput, *, provider: Provider, config: Config) -> 
         (f for r, _ in runs.values() if not isinstance(r, Exception) for f in r.findings),
         key=lambda f: (SEVERITY_ORDER[f.severity], -f.confidence),
     )
-    verified = [
-        # No verifier or triage yet: every surviving finding is kept and recommended.
-        VerifiedFinding(**f.model_dump(), verdict="keep", verifier_reason="", triage="review_recommended")
-        for f in findings
-    ]
-    stats = _stats(runs, [f.path for f in files], len(verified), time.perf_counter() - started, config)
-    return ReviewResult(findings=verified, stats=stats)
+
+    # Verifier (skippable for ablations) -> triage.
+    t0 = time.perf_counter()
+    if verify:
+        vrun = run_verifier(findings, review_input=review_input, files=files, provider=provider, config=config)
+        verified = vrun.findings
+    else:
+        vrun, verified = None, skip_verifier(findings)
+    verifier_wall = time.perf_counter() - t0
+    after_verifier = sum(1 for f in verified if f.verdict == "keep" and not f.duplicate_of)
+    triaged = triage(verified, config.pipeline)
+
+    stats = _stats(runs, [f.path for f in files], len(triaged.findings), time.perf_counter() - started, config)
+    stats["counts"]["after_verifier"] = after_verifier
+    stats["counts"]["after_triage"] = sum(1 for f in triaged.findings if f.triage != "dropped")
+    stats.setdefault("stages", {}).update({
+        "verifier": _verifier_stats(vrun, len(findings), verifier_wall, config),
+        "triage": {"dropped_by_reason": triaged.dropped_by_reason, "cap_removed": triaged.cap_removed},
+    })
+    if vrun:
+        _add_usage(stats, vrun.usage, config.cost_usd(
+            config.models.verifier, input_tokens=vrun.usage.input_tokens, output_tokens=vrun.usage.output_tokens))
+    return ReviewResult(findings=triaged.findings, stats=stats)
+
+
+def _verifier_stats(vrun, findings_in: int, wall_s: float, config: Config) -> dict:
+    if vrun is None:
+        return {"status": "skipped", "findings_in": findings_in}
+    u = vrun.usage
+    return {
+        "status": vrun.status, "model": config.models.verifier, "wall_s": round(wall_s, 3),
+        "input_tokens": u.input_tokens, "output_tokens": u.output_tokens,
+        "cost_usd": config.cost_usd(config.models.verifier, input_tokens=u.input_tokens,
+                                    output_tokens=u.output_tokens),
+        "calls": u.calls, "cache_hits": u.cache_hits, "cached": u.cached,
+        "findings_in": findings_in, "batches": vrun.batches, "failed_batches": vrun.failed_batches,
+        "missing_verdicts": vrun.missing_verdicts, "errors": vrun.errors,
+    }
+
+
+def _add_usage(stats: dict, usage: Usage, cost: float) -> None:
+    """Fold a later stage's usage into the totals."""
+    t = stats["totals"]
+    t["input_tokens"] += usage.input_tokens
+    t["output_tokens"] += usage.output_tokens
+    t["cost_usd"] += cost
+    t["calls"] += usage.calls
+    t["cache_hits"] += usage.cache_hits
+    t["cached"] = t["cached"] and usage.cached if usage.calls else t["cached"]
 
 
 def _stats(runs, files_reviewed: list[str], kept: int, wall_s: float, config: Config) -> dict:
