@@ -16,7 +16,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from reviewer.config import Config
-from reviewer.context.rules import load_rules as read_rules
+from reviewer.context import ContextBundle
 from reviewer.diff import FileDiff
 from reviewer.llm import Provider, Usage, chat_validated
 from reviewer.models import Finding, ReviewInput, Severity, Verdict, VerifiedFinding
@@ -101,14 +101,16 @@ def run_verifier(
     files: list[FileDiff],
     provider: Provider,
     config: Config,
-    context: str = "",
+    bundle: ContextBundle | None = None,
 ) -> VerifierRun:
-    """`context` is the context bundle's code (`ContextBundle.code`): shown to the verifier
-    as `<context>` so it can check claims about callers and callees. Empty = no section."""
+    """`bundle` is the context bundle the specialists saw: its code is shown to the verifier as
+    `<context>` (to check claims about callers and callees), and its already parsed team rules and
+    don't-flag list as `<team_rules>` / `<do_not_flag>`. No bundle, or an empty one (the no-context
+    ablation, D36, D44), means no such sections."""
     if not findings:
         return VerifierRun(findings=[])
-    # context.enabled: false (the no-context ablation) means no rules either, as for the specialists (D36, D44).
-    rules, do_not_flag = load_rules(review_input) if config.context.enabled else ("", "")
+    bundle = bundle or ContextBundle()
+    context, rules, do_not_flag = bundle.code, bundle.rules, bundle.do_not_flag
     added = {f.path: set(f.added_lines) for f in files}
     batches = split_batches(findings)
 
@@ -242,11 +244,3 @@ def escape_prompt_tags(text: str) -> str:
     """Stop untrusted text from forging or closing the prompt's own tags (finding, team_rules,
     do_not_flag, context); everything else, code included, stays as it is."""
     return re.sub(r"</?\s*(finding|team_rules|do_not_flag|context)\b", lambda m: m.group(0).replace("<", "&lt;"), text)
-
-
-def load_rules(review_input: ReviewInput) -> tuple[str, str]:
-    """(team rules, don't-flag list) as prompt text. The one rules reader, shared with the
-    context bundle: explicit path, else REVIEW.md at the base revision, else the checkout's (D36)."""
-    rules = read_rules(review_input.repo_root, review_input.review_rules_path, review_input.base_ref)
-    return rules.render_rules(), rules.render_do_not_flag()
-
