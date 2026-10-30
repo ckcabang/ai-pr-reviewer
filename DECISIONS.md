@@ -62,3 +62,6 @@ Eval runs bypass the cache by design, so they cost money each time. `run_eval` w
 
 ## D18: The live demo replays from the cache, labelled as such
 The M7 dry-run fills the cache for pr09 and pr06. In the live demo, cached stats are marked "(cached)" (latency would otherwise look misleadingly low), and `--no-cache` is ready for a fresh run on request.
+
+## D19: Demo service lives at `demo_service/`; one pytest run covers it and the repo tests
+The service is `demo_service/app/...` (imports as `app`) with its own tests in `demo_service/tests/`, as the spec lays out. To avoid pytest collection clashes with the repo's `tests/` (same basenames such as `test_pricing.py`, two `conftest.py` files), `pyproject.toml` sets `addopts = "--import-mode=importlib"` and `pythonpath = ["demo_service"]`. `uv run pytest` runs both. The service tests use fixtures (not `import conftest`) for helpers, since importlib mode doesn't put test directories on `sys.path`. `httpx` was added as a dependency (the service's gateway/email clients use it, and FastAPI's `TestClient` needs it).

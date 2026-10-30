@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.162.0",
+    "httpx>=0.28.1",
     "numpy>=2.2.6",
     "openai>=3.41.0",
     "pydantic>=2.14.2",
@@ -27,3 +28,9 @@ build-backend = "uv_build"
 dev = [
     "pytest>=9.2.0",
 ]
+
+[tool.pytest.ini_options]
+# importlib mode + pythonpath let the repo's tests and demo_service/tests share one run
+# without basename collisions; the service imports as `app`.
+addopts = "--import-mode=importlib"
+pythonpath = ["demo_service"]
