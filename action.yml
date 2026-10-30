@@ -1,0 +1,53 @@
+name: AI PR review
+description: >-
+  Review a pull request with the ai-pr-reviewer pipeline and post the findings as one COMMENT
+  review with inline comments. Never requests changes, never approves.
+author: ckcabang
+
+inputs:
+  openai-api-key:
+    description: API key for the model provider (pass a repository secret).
+    required: true
+  github-token:
+    description: Token used to read the PR and post the review (needs pull-requests write).
+    required: false
+    default: ${{ github.token }}
+  config:
+    description: Path (in the reviewed repo) to a reviewer config file. Default is this action's config.yaml.
+    required: false
+    default: ""
+  fail-on:
+    description: "`action_required` fails the step when the review has action-required findings; `never` always passes."
+    required: false
+    default: never
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+
+    - name: Sync the reviewer project from its lockfile
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: uv sync --project "$ACTION_PATH" --frozen --no-dev
+
+    # Every value reaches the shell through env, never by interpolation into the script (D15).
+    # Runs in the workspace, where the caller's workflow checked out the PR head SHA.
+    - name: Review the pull request
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        PR_URL: ${{ github.event.pull_request.html_url }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+        REVIEW_CONFIG: ${{ inputs.config }}
+        REVIEW_FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        set -euo pipefail
+        args=(review --repo . --pr "$PR_URL" --post --fail-on "$REVIEW_FAIL_ON")
+        if [ -n "$REVIEW_CONFIG" ]; then
+          args+=(--config "$REVIEW_CONFIG")
+        fi
+        uv run --project "$ACTION_PATH" --frozen --no-dev reviewer "${args[@]}"
