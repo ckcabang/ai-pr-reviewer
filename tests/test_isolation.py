@@ -84,7 +84,8 @@ def test_reviewing_a_dataset_pr_never_opens_the_labels_nor_shows_them_to_a_model
 
     review_input = ReviewInput(repo_root=m.repo, diff=_git_diff(m.repo, m.base_ref), title=pr.title,
                                description=pr.description)
-    provider = FakeProvider({"correctness": {"findings": []}, "baseline": {"findings": []}})
+    empty = {"findings": []}
+    provider = FakeProvider({"correctness": empty, "security": empty, "standards": empty, "baseline": empty})
 
     guard = OpenGuard(monkeypatch)  # armed only after loading and materializing, i.e. for the review itself
     review(review_input, provider=provider, config=config)
@@ -92,7 +93,7 @@ def test_reviewing_a_dataset_pr_never_opens_the_labels_nor_shows_them_to_a_model
     monkeypatch.undo()
 
     assert guard.violations == []
-    assert len(provider.calls) == 2
+    assert len(provider.calls) == 4  # three specialists (the dataset repo has REVIEW.md) + the baseline
 
     # nothing about the expected issues is in the repo under review or in any prompt
     secrets = [i.description[:40] for i in pr.expected_issues] + [i.id for i in pr.expected_issues]

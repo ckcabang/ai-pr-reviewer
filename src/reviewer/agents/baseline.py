@@ -11,26 +11,11 @@ import time
 
 from reviewer.agents.base import SpecialistRun, SpecialistSpec, run_specialist
 from reviewer.agents.correctness import CORRECTNESS
+from reviewer.agents.security import SECURITY
 from reviewer.config import Config
 from reviewer.diff import parse_diff
 from reviewer.llm import Provider
 from reviewer.models import SEVERITY_ORDER, ReviewInput, ReviewResult, VerifiedFinding
-
-# The security checklist from plan 4.4, kept here until the security specialist lands; a test
-# (tests/test_baseline.py) then checks that the baseline still carries that specialist's lists.
-_SECURITY_FLAG = [
-    "Injection: SQL built from strings, command injection, path traversal through user-supplied names.",
-    "Missing authentication, authorization or ownership checks on endpoints that change or read user data.",
-    "Secrets in code: hardcoded keys, tokens or passwords.",
-    "Sensitive data in logs or responses: passwords, tokens, card numbers, exception text returned to clients.",
-    "Missing webhook signature checks, or signatures compared without a constant-time compare.",
-    "Unsafe deserialization, SSRF and open redirects.",
-]
-_SECURITY_DO_NOT_FLAG = [
-    "Theoretical risks that need unlikely preconditions.",
-    "Defense-in-depth suggestions when the primary defense already exists.",
-    "\"Use library X\" suggestions.",
-]
 
 
 def _merge(*lists: list[str]) -> list[str]:
@@ -40,8 +25,8 @@ def _merge(*lists: list[str]) -> list[str]:
 BASELINE = SpecialistSpec(
     name="baseline",
     role="code reviewer covering both correctness and security",
-    flag=_merge(CORRECTNESS.flag, _SECURITY_FLAG),
-    do_not_flag=_merge(CORRECTNESS.do_not_flag, _SECURITY_DO_NOT_FLAG),
+    flag=_merge(CORRECTNESS.flag, SECURITY.flag),
+    do_not_flag=_merge(CORRECTNESS.do_not_flag, SECURITY.do_not_flag),
 )
 
 

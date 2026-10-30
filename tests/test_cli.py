@@ -41,7 +41,7 @@ def run(args, repo, config_path, provider):
 def fake(verdict="keep", severity="high"):
     fid = finding_id("correctness", FINDING["file"], FINDING["line"], FINDING["title"])
     verifier = {"verdicts": [{"id": fid, "verdict": verdict, "confidence": 0.9, "severity": severity}]}
-    return FakeProvider({"correctness": {"findings": [FINDING]}, "verifier": verifier})
+    return FakeProvider({"correctness": {"findings": [FINDING]}, "security": {"findings": []}, "verifier": verifier})
 
 
 def test_markdown_goes_to_stdout_by_default_and_exit_code_is_0(repo, config_path, capsys):
@@ -104,13 +104,13 @@ def test_cache_is_on_by_default_and_off_with_no_cache(repo, config_path):
     provider = fake()
     run([], repo, config_path, provider)
     run([], repo, config_path, provider)
-    assert len(provider.calls) == 2  # specialist + verifier; the second run replayed from the cache
+    assert len(provider.calls) == 3  # correctness + security + verifier; the second run replayed from the cache
 
     run(["--no-cache"], repo, config_path, provider)
-    assert len(provider.calls) == 4
+    assert len(provider.calls) == 6
 
     run(["--no-cache"], repo, config_path, provider)
-    assert len(provider.calls) == 6  # --no-cache does not write the cache either
+    assert len(provider.calls) == 9  # --no-cache does not write the cache either
 
 
 def test_cached_run_is_labelled_in_the_output(repo, config_path, capsys):

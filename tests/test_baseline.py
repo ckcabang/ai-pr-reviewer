@@ -126,10 +126,11 @@ def test_a_failed_baseline_call_raises_rather_than_looking_like_a_clean_review(r
         review_baseline(review_input, provider=provider, config=config)
 
 
-def test_baseline_carries_the_security_specialists_checklist_once_that_specialist_exists():
-    security = pytest.importorskip("reviewer.agents.security")
+def test_baseline_is_the_merged_correctness_and_security_checklists():
+    """D6: the baseline gets exactly the specialists' lists, not a better or worse checklist."""
     from reviewer.agents.baseline import BASELINE
+    from reviewer.agents.correctness import CORRECTNESS
+    from reviewer.agents.security import SECURITY
 
-    spec = security.SECURITY
-    assert set(spec.flag) <= set(BASELINE.flag)
-    assert set(spec.do_not_flag) <= set(BASELINE.do_not_flag)
+    assert set(BASELINE.flag) == set(CORRECTNESS.flag) | set(SECURITY.flag)
+    assert set(BASELINE.do_not_flag) == set(CORRECTNESS.do_not_flag) | set(SECURITY.do_not_flag)

@@ -48,16 +48,37 @@ def _code_block(text: str) -> str:
     return f"{fence}\n{text}\n{fence}"
 
 
+def _usage_text(s: dict) -> str:
+    """`1200 in / 300 out, $0.0027`: what a model stage consumed."""
+    return f"{s.get('input_tokens', 0)} in / {s.get('output_tokens', 0)} out, ${s.get('cost_usd', 0.0):.4f}"
+
+
+def _cached_tag(s: dict) -> str:
+    """Stats replayed from the cache are labelled (D18): the time is not what a fresh run takes."""
+    return " (cached)" if s.get("cached") else ""
+
+
+def _specialist_line(name: str, s: dict) -> str:
+    if s["status"] == "failed":
+        return f"- Specialist {name}: FAILED ({s['error']})"
+    if s["status"] == "skipped":
+        return f"- Specialist {name}: skipped ({s['reason']})"
+    dropped = [f"{n} {why}" for n, why in ((s.get("dropped_invalid_anchor", 0), "anchored outside the diff"),
+                                           (s.get("dropped_invalid_rule", 0), "citing no valid rule")) if n]
+    note = f" (dropped: {', '.join(dropped)})" if dropped else ""
+    return (f"- Specialist {name}: {s['raw_findings']} raw → {s['kept_findings']} kept{note}, "
+            f"{s['wall_s']:.1f}s, {_usage_text(s)}{_cached_tag(s)}")
+
+
 def _stage_lines(stages: dict, counts: dict) -> list[str]:
     out = []
     v = stages.get("verifier")
     if v and v["status"] == "skipped":
         out.append("- Verifier: skipped")
     elif v:
-        tag = " (cached)" if v.get("cached") else ""
         note = "" if v["status"] == "ok" else f" — {v['status'].upper()}: findings kept unverified"
-        out.append(f"- Verifier: {v['findings_in']} in → {counts.get('after_verifier', 0)} kept, "
-                   f"{v['wall_s']:.1f}s{tag}{note}")
+        out.append(f"- Verifier: {v['findings_in']} in → {counts.get('after_verifier', 0)} kept{note}, "
+                   f"{v['wall_s']:.1f}s, {_usage_text(v)}{_cached_tag(v)}")
     t = stages.get("triage")
     if t:
         removed = t.get("cap_removed", 0)
@@ -77,7 +98,12 @@ def _context_lines(c: dict | None) -> list[str]:
 def _stats_md(stats: dict) -> str:
     totals = stats.get("totals", {})
     counts = stats.get("counts", {})
-    cached = " (cached)" if totals.get("cached") else ""
+    if totals.get("cached"):
+        cached = " (cached)"
+    elif totals.get("cache_hits"):
+        cached = f" (partly cached: {totals['cache_hits']} of {totals['calls']} calls)"
+    else:
+        cached = ""
     lines = [
         "<details>",
         "<summary>Review stats</summary>",
@@ -89,16 +115,8 @@ def _stats_md(stats: dict) -> str:
         f"- Estimated cost: ${totals.get('cost_usd', 0.0):.4f}",
         f"- Latency: {totals.get('wall_s', 0.0):.1f}s{cached}",
     ]
+    lines += [_specialist_line(name, s) for name, s in stats.get("specialists", {}).items()]
     lines += _stage_lines(stats.get("stages", {}), counts)
-    for name, s in stats.get("specialists", {}).items():
-        if s["status"] == "failed":
-            lines.append(f"- Specialist {name}: FAILED ({s['error']})")
-        else:
-            tag = " (cached)" if s.get("cached") else ""
-            lines.append(
-                f"- Specialist {name}: {s['raw_findings']} raw → {s['kept_findings']} kept, "
-                f"{s['wall_s']:.1f}s{tag}"
-            )
     lines += ["", "</details>"]
     return "\n".join(lines)
 

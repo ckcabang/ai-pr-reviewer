@@ -1,17 +1,19 @@
 """The review entry point (Seam 1): ReviewInput -> ReviewResult.
 
-Walking skeleton: diff -> correctness specialist -> result. Later stages (context,
-more specialists, verifier, triage) slot in between; the stats shape is already
-per-stage so they only add keys.
+diff -> context bundle -> three specialists in parallel -> verifier -> triage. The stats are
+per stage (`specialists.<name>`, `stages.verifier`, `stages.triage`) plus `totals`.
 """
 from __future__ import annotations
 
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 
 from reviewer.agents.base import SpecialistRun, SpecialistSpec, run_specialist
 from reviewer.agents.correctness import CORRECTNESS
+from reviewer.agents.security import SECURITY
+from reviewer.agents.standards import STANDARDS
 from reviewer.config import Config
 from reviewer.context import build_context
 from reviewer.diff import parse_diff
@@ -22,7 +24,14 @@ from reviewer.verifier import run_verifier, skip_verifier
 
 log = logging.getLogger("reviewer")
 
-SPECIALISTS: list[SpecialistSpec] = [CORRECTNESS]
+SPECIALISTS: list[SpecialistSpec] = [CORRECTNESS, SECURITY, STANDARDS]
+
+
+@dataclass(frozen=True)
+class Skipped:
+    """A specialist that was not asked because it has nothing to work from (not a failure)."""
+
+    reason: str
 
 
 class ReviewError(Exception):
@@ -43,9 +52,11 @@ def review(review_input: ReviewInput, *, provider: Provider, config: Config, ver
 
     log.info("reviewing %d file(s) with %d specialist(s)", len(files), len(SPECIALISTS))
     bundle = build_context(review_input, files, config)  # context engine (#5): same bundle for every specialist
-    runs: dict[str, tuple[SpecialistRun | Exception, float]] = {}
+    runs: dict[str, tuple[SpecialistRun | Exception | Skipped, float]] = {}
 
     def work(spec: SpecialistSpec):
+        if spec.needs_rules and not bundle.rules:
+            return spec.name, Skipped("no team rules"), 0.0
         t0 = time.perf_counter()
         try:
             run: SpecialistRun | Exception = run_specialist(
@@ -61,16 +72,19 @@ def review(review_input: ReviewInput, *, provider: Provider, config: Config, ver
             runs[name] = (run, wall)
             if isinstance(run, Exception):
                 log.warning("specialist %s failed: %s", name, run)
+            elif isinstance(run, Skipped):
+                log.info("specialist %s skipped: %s", name, run.reason)
             else:
                 log.info("specialist %s: %d finding(s)", name, len(run.findings))
 
     failures = {n: str(r) or type(r).__name__ for n, (r, _) in runs.items() if isinstance(r, Exception)}
-    if len(failures) == len(runs):
+    asked = sum(1 for r, _ in runs.values() if not isinstance(r, Skipped))
+    if len(failures) == asked:
         details = "; ".join(f"{n}: {msg}" for n, msg in failures.items())
         raise AllSpecialistsFailed(f"all specialists failed: {details}")
 
     findings = sorted(
-        (f for r, _ in runs.values() if not isinstance(r, Exception) for f in r.findings),
+        (f for r, _ in runs.values() if isinstance(r, SpecialistRun) for f in r.findings),
         key=lambda f: (SEVERITY_ORDER[f.severity], -f.confidence),
     )
 
@@ -135,6 +149,9 @@ def _stats(runs, files_reviewed: list[str], kept: int, wall_s: float, config: Co
             specialists[name] = {"status": "failed", "error": str(run) or type(run).__name__,
                                  "wall_s": round(wall, 3)}
             continue
+        if isinstance(run, Skipped):
+            specialists[name] = {"status": "skipped", "reason": run.reason}
+            continue
         model = config.models.specialist
         spec_cost = config.cost_usd(model, input_tokens=run.usage.input_tokens,
                                     output_tokens=run.usage.output_tokens)
@@ -151,6 +168,7 @@ def _stats(runs, files_reviewed: list[str], kept: int, wall_s: float, config: Co
             "raw_findings": run.raw_count,
             "kept_findings": len(run.findings),
             "dropped_invalid_anchor": run.dropped_invalid_anchor,
+            "dropped_invalid_rule": run.dropped_invalid_rule,
         }
         total += run.usage
         raw += run.raw_count

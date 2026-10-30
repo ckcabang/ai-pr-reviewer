@@ -50,6 +50,8 @@ class ContextBundle:
     """The `<team_rules>` body."""
     do_not_flag: str = ""
     """The `<do_not_flag>` body."""
+    rule_ids: tuple[str, ...] = ()
+    """Ids of the rules in `rules` (R1, R2, ...), so a finding's `rule_id` can be checked."""
     stats: dict = field(default_factory=dict)
 
     @property
@@ -83,7 +85,8 @@ def build_context(review_input: "ReviewInput", files: list[FileDiff], config: "C
 
 
 def _bundle(code: str, rules: Rules, stats: dict) -> ContextBundle:
-    return ContextBundle(code=code, rules=rules.render_rules(), do_not_flag=rules.render_do_not_flag(), stats=stats)
+    return ContextBundle(code=code, rules=rules.render_rules(), do_not_flag=rules.render_do_not_flag(),
+                         rule_ids=tuple(r.id for r in rules.rules), stats=stats)
 
 
 # -- selection --------------------------------------------------------------------------
