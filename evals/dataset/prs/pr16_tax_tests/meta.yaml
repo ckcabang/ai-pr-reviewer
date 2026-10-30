@@ -1,0 +1,11 @@
+id: pr16
+title: Add unit tests for tax calculation
+description: |
+  `calculate_tax` only had a single rounding test. This adds `tests/test_tax.py` to cover it
+  properly. Tests only, no production code changes.
+
+  - Default rate vs. `TAX_RATE` from the environment vs. an explicit rate argument.
+  - Half-up rounding to whole cents, including sub-cent and large amounts.
+  - Zero amount and zero rate.
+  - Float rates are rejected.
+  - `get_order_total` charges tax on the discounted amount.

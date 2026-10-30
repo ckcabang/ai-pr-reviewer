@@ -1,0 +1,11 @@
+id: pr10
+title: Add payment gateway webhook
+description: |
+  The gateway now calls us when it refunds a charge from its own dashboard, so our order status
+  can fall out of sync. This adds a `POST /webhooks/payments` endpoint next to the shipping one.
+
+  - Verifies the `X-Signature` header against the shared webhook secret.
+  - On `charge.refunded`, looks the charge up in `payments` and moves the order to `refunded`
+    through `order_state.transition`.
+  - Unknown event types get a 422, unknown charges a 404, illegal state moves a 409.
+  - Added a test that posts a signed and an unsigned refund event.

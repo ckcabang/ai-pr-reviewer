@@ -1,0 +1,70 @@
+diff --git a/tests/test_tax.py b/tests/test_tax.py
+new file mode 100644
+index 0000000..fe3638e
+--- /dev/null
++++ b/tests/test_tax.py
+@@ -0,0 +1,64 @@
++from decimal import Decimal
++
++import pytest
++
++from app import db, settings
++from app.services import pricing
++
++
++def _set_tax_rate(monkeypatch, rate):
++    monkeypatch.setenv("TAX_RATE", rate)
++    settings.get_settings.cache_clear()
++
++
++def test_tax_uses_the_configured_rate_by_default():
++    assert pricing.calculate_tax(Decimal("100.00")) == Decimal("8.25")
++
++
++def test_tax_rate_comes_from_the_environment(monkeypatch):
++    _set_tax_rate(monkeypatch, "0.20")
++    assert pricing.calculate_tax(Decimal("50.00")) == Decimal("10.00")
++
++
++def test_explicit_rate_overrides_the_configured_one(monkeypatch):
++    _set_tax_rate(monkeypatch, "0.20")
++    assert pricing.calculate_tax(Decimal("50.00"), Decimal("0.10")) == Decimal("5.00")
++
++
++@pytest.mark.parametrize(
++    "amount, rate, expected",
++    [
++        ("10.00", "0.0825", "0.83"),   # 0.825 rounds half up
++        ("0.01", "0.0825", "0.00"),    # 0.000825 rounds down
++        ("19.99", "0.0825", "1.65"),   # 1.649175
++        ("1000000.00", "0.0825", "82500.00"),
++    ],
++)
++def test_tax_is_rounded_half_up_to_whole_cents(amount, rate, expected):
++    assert pricing.calculate_tax(Decimal(amount), Decimal(rate)) == Decimal(expected)
++
++
++def test_no_tax_on_a_zero_amount_or_a_zero_rate():
++    assert pricing.calculate_tax(Decimal("0.00")) == Decimal("0.00")
++    assert pricing.calculate_tax(Decimal("99.99"), Decimal("0")) == Decimal("0.00")
++
++
++def test_tax_result_is_a_two_decimal_place_decimal():
++    tax = pricing.calculate_tax(Decimal("12.34"))
++    assert isinstance(tax, Decimal)
++    assert tax.as_tuple().exponent == -2
++
++
++def test_float_rates_are_rejected():
++    with pytest.raises(TypeError):
++        pricing.calculate_tax(Decimal("10.00"), 0.0825)
++
++
++def test_order_total_taxes_the_discounted_amount(monkeypatch):
++    _set_tax_rate(monkeypatch, "0.10")
++    db.execute("INSERT INTO users (id, email, full_name, password_hash) VALUES (1, 'a@b.c', 'A', 'x')")
++    db.execute("INSERT INTO discount_codes (code, percent_off) VALUES ('HALF', '50')")
++    db.execute("INSERT INTO orders (id, user_id, status, discount_code) VALUES (1, 1, 'pending', 'HALF')")
++    db.execute("INSERT INTO order_items (order_id, sku, quantity, unit_price) VALUES (1, 'W-1', 4, '10.00')")
++    # 40.00 - 50% = 20.00, tax on 20.00 at 10% = 2.00
++    assert pricing.get_order_total(1) == Decimal("22.00")

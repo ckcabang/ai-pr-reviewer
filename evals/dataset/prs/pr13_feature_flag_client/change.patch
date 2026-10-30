@@ -1,0 +1,89 @@
+diff --git a/app/clients/feature_flags.py b/app/clients/feature_flags.py
+new file mode 100644
+index 0000000..a42e482
+--- /dev/null
++++ b/app/clients/feature_flags.py
+@@ -0,0 +1,32 @@
++"""Feature-flag service wrapper (R4). Flags default to off whenever the service cannot be reached."""
++from __future__ import annotations
++
++from typing import Optional
++
++import httpx
++
++from app.logging_setup import get_logger
++from app.settings import get_settings
++
++logger = get_logger(__name__)
++
++FLAG_SERVICE_API_KEY = "ffk_live_8f3a91c27d4e46b0a5c1e7d92b6f0384"
++_transport: Optional[httpx.BaseTransport] = None  # tests swap in an httpx.MockTransport
++
++
++def is_enabled(flag: str, user_id: int) -> bool:
++    """Whether `flag` is on for this user, e.g. `is_enabled("new_checkout", user.id)`."""
++    settings = get_settings()
++    try:
++        with httpx.Client(
++            base_url=settings.feature_flags_url,
++            timeout=settings.http_timeout_seconds,
++            headers={"Authorization": f"Bearer {FLAG_SERVICE_API_KEY}"},
++            transport=_transport,
++        ) as client:
++            response = client.get(f"/flags/{flag}", params={"user_id": user_id})
++            response.raise_for_status()
++            return bool(response.json().get("enabled", False))
++    except httpx.HTTPError:
++        logger.warning("feature flag lookup failed for %s; treating it as off", flag)
++        return False
+diff --git a/app/settings.py b/app/settings.py
+index edbeeff..d035a57 100644
+--- a/app/settings.py
++++ b/app/settings.py
+@@ -19,6 +19,7 @@ class Settings:
+     email_api_url: str
+     email_api_key: str
+     webhook_secret: str
++    feature_flags_url: str
+ 
+ 
+ @lru_cache
+@@ -35,4 +36,5 @@ def get_settings() -> Settings:
+         email_api_url=env.get("EMAIL_API_URL", "https://mail.example.test"),
+         email_api_key=env.get("EMAIL_API_KEY", ""),
+         webhook_secret=env.get("WEBHOOK_SECRET", ""),
++        feature_flags_url=env.get("FEATURE_FLAGS_URL", "https://flags.example.test"),
+     )
+diff --git a/tests/test_feature_flags.py b/tests/test_feature_flags.py
+new file mode 100644
+index 0000000..d125d4e
+--- /dev/null
++++ b/tests/test_feature_flags.py
+@@ -0,0 +1,27 @@
++import httpx
++import pytest
++
++from app.clients import feature_flags
++
++
++@pytest.fixture(autouse=True)
++def reset_transport():
++    yield
++    feature_flags._transport = None
++
++
++def test_flag_value_comes_from_the_service():
++    seen = []
++
++    def handler(request: httpx.Request) -> httpx.Response:
++        seen.append(request.url.path)
++        return httpx.Response(200, json={"enabled": True})
++
++    feature_flags._transport = httpx.MockTransport(handler)
++    assert feature_flags.is_enabled("new_checkout", 7) is True
++    assert seen == ["/flags/new_checkout"]
++
++
++def test_flag_is_off_when_the_service_is_down():
++    feature_flags._transport = httpx.MockTransport(lambda request: httpx.Response(503))
++    assert feature_flags.is_enabled("new_checkout", 7) is False

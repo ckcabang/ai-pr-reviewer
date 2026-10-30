@@ -1,0 +1,79 @@
+diff --git a/app/routes/webhooks.py b/app/routes/webhooks.py
+index d72ef17..a3b0d3a 100644
+--- a/app/routes/webhooks.py
++++ b/app/routes/webhooks.py
+@@ -6,6 +6,7 @@ import json
+ 
+ from fastapi import APIRouter, Header, HTTPException, Request
+ 
++from app import db
+ from app.logging_setup import get_logger, redact
+ from app.services import order_state, orders
+ from app.settings import get_settings
+@@ -14,6 +15,7 @@ logger = get_logger(__name__)
+ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+ 
+ SHIPPING_STATES = {"shipped", "delivered"}
++PAYMENT_EVENTS = {"charge.refunded"}
+ 
+ 
+ def sign(body: bytes, secret: str) -> str:
+@@ -45,3 +47,32 @@ async def shipping_update(request: Request, x_signature: str = Header(default=""
+         logger.exception("shipping webhook failed")
+         raise HTTPException(status_code=400, detail="Could not process webhook")
+     return {"order_id": order["id"], "status": order["status"]}
++
++
++@router.post("/payments")
++async def payment_event(request: Request, x_signature: str = Header(default="")):
++    """Payment gateway callback: marks the order refunded when the gateway refunds a charge."""
++    raw = await request.body()
++    if sign(raw, get_settings().webhook_secret) != x_signature:
++        raise HTTPException(status_code=401, detail="Invalid signature")
++
++    try:
++        event = json.loads(raw)
++        logger.info("payment webhook %s", redact(event))
++        if event["type"] not in PAYMENT_EVENTS:
++            raise HTTPException(status_code=422, detail="Unsupported event type")
++        row = db.execute(
++            "SELECT order_id FROM payments WHERE charge_id = ?", (event["charge_id"],)
++        ).one()
++        if row is None:
++            raise HTTPException(status_code=404, detail="Unknown charge")
++        order = orders.get_order(row["order_id"])
++        order_state.transition(order, "refunded")
++    except HTTPException:
++        raise
++    except order_state.InvalidTransition:
++        raise HTTPException(status_code=409, detail="Order cannot move to that state")
++    except Exception as exc:
++        logger.exception("payment webhook failed")
++        raise HTTPException(status_code=400, detail=f"Could not process webhook: {exc}")
++    return {"order_id": order["id"], "status": order["status"]}
+diff --git a/tests/test_api.py b/tests/test_api.py
+index 0d008b2..073245c 100644
+--- a/tests/test_api.py
++++ b/tests/test_api.py
+@@ -137,6 +137,21 @@ def test_shipping_webhook_rejects_bad_signature_and_applies_good_one(client, sto
+     assert good.status_code == 200 and good.json()["status"] == "shipped"
+ 
+ 
++def test_payment_webhook_marks_a_captured_order_refunded(client, stocked, create_user, auth_headers):
++    user = create_user()
++    order = _place_order(client, auth_headers(user))
++    db.execute("UPDATE orders SET status = 'paid' WHERE id = ?", (order["id"],))
++    db.execute("INSERT INTO payments (order_id, charge_id, amount) VALUES (?, 'ch_1', '21.65')", (order["id"],))
++    body = json.dumps({"type": "charge.refunded", "charge_id": "ch_1"}).encode()
++
++    bad = client.post("/webhooks/payments", content=body, headers={"X-Signature": "nope"})
++    good = client.post("/webhooks/payments", content=body,
++                       headers={"X-Signature": webhooks.sign(body, "test-webhook-secret")})
++
++    assert bad.status_code == 401
++    assert good.status_code == 200 and good.json()["status"] == "refunded"
++
++
+ def test_inventory_restock_is_admin_only(client, stocked, create_user, auth_headers):
+     member, admin = create_user("m@example.com"), create_user("a@example.com", admin=True)
+     url = "/inventory/W-1/restock"
