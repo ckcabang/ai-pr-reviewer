@@ -1,0 +1,34 @@
+# Adopt the AI reviewer: copy this file to .github/workflows/ai-review.yml and add an
+# OPENAI_API_KEY repository secret. The review is posted as one COMMENT review with inline comments.
+name: AI review
+
+on:
+  # Never `pull_request_target`: it would run this workflow with secrets and a write token
+  # while checking out code the PR author controls.
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    # Skip drafts; `ready_for_review` runs the review when the draft is published.
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      # Check out the PR head commit, not the default merge commit, so line numbers match the
+      # commit the review is posted against (D15). Full history is needed to diff against the base.
+      # Actions are pinned to major versions here; pin to full commit SHAs in production.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - uses: ckcabang/ai-pr-reviewer@main
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          # github-token: defaults to the workflow token
+          # config: path/to/reviewer-config.yaml
+          # fail-on: action_required   # default is `never`: the check always passes
