@@ -1,0 +1,13 @@
+issues:
+  - id: pr13-1
+    file: app/clients/feature_flags.py
+    line_hint: 13            # FLAG_SERVICE_API_KEY = "ffk_live_..."
+    area: security
+    severity: high
+    rule_id: R8
+    requires: diff
+    description: >-
+      The feature-flag service API key is hardcoded as a module constant
+      (`FLAG_SERVICE_API_KEY = "ffk_live_..."`) and committed to the repo. Secrets must come from
+      `settings` (environment) like the payment gateway and email keys do (R8); anyone with read
+      access to the repository gets a live credential, and rotating it needs a code change.

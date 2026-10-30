@@ -1,0 +1,10 @@
+id: pr02
+title: Add order search by customer email
+description: |
+  Adds `GET /orders/search?email=...`, which returns the orders whose customer email contains
+  the given text (case-insensitive). This is a first step towards the "find an order" box in the
+  account UI.
+
+  - New `orders.search_orders_by_email` in the service layer, joining orders to users.
+  - The route is registered before `/{order_id}` so `search` is not parsed as an id.
+  - Tests cover authentication, partial/case-insensitive matching, and an empty result.

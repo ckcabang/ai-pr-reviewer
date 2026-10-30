@@ -73,3 +73,29 @@ def _stats_md(stats: dict) -> str:
             )
     lines += ["", "</details>"]
     return "\n".join(lines)
+
+
+def render_inline_comment(f: VerifiedFinding) -> str:
+    """Body of an inline PR comment for one finding (the file:line heading doubles as a label)."""
+    return _finding_md(f).strip()
+
+
+def render_review_body(result: ReviewResult, inline_ids: set[str]) -> str:
+    """Summary body of a posted PR review. Findings whose id is in `inline_ids` were posted
+    as inline comments and are only listed; every other finding is spelled out in full."""
+    action = result.in_tier("action_required")
+    recommended = result.in_tier("review_recommended")
+    out = [f"# AI Review: {len(action)} action required · {len(recommended)} recommended", ""]
+    if not action and not recommended:
+        out += ["No findings. Nothing in this change needs attention.", ""]
+    inline = [f for f in action + recommended if f.id in inline_ids]
+    rest = [f for f in action + recommended if f.id not in inline_ids]
+    if inline:
+        out += ["Posted as inline comments:", ""]
+        out += [f"- `{f.file}:{f.line}` [{_BADGE[f.severity]}] {f.title}" for f in inline]
+        out.append("")
+    if rest:
+        out += ["## Findings not on a changed line", ""]
+        out += [_finding_md(f) for f in rest]
+    out.append(_stats_md(result.stats))
+    return "\n".join(out).rstrip() + "\n"

@@ -1,0 +1,137 @@
+diff --git a/app/models.py b/app/models.py
+index bd16079..c6a827e 100644
+--- a/app/models.py
++++ b/app/models.py
+@@ -68,6 +68,13 @@ class OrderOut(BaseModel):
+     items: list[OrderItemOut]
+ 
+ 
++class Quote(BaseModel):
++    subtotal: Decimal
++    discount: Decimal
++    tax: Decimal
++    total: Decimal
++
++
+ class CaptureRequest(BaseModel):
+     order_id: int
+ 
+diff --git a/app/routes/orders.py b/app/routes/orders.py
+index 51d348b..47844bf 100644
+--- a/app/routes/orders.py
++++ b/app/routes/orders.py
+@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
+ 
+ from app import auth
+ from app.logging_setup import get_logger
+-from app.models import CurrentUser, Invoice, OrderCreate, OrderOut
++from app.models import CurrentUser, Invoice, OrderCreate, OrderOut, Quote
+ from app.services import inventory, invoices, order_state, orders, pricing
+ 
+ logger = get_logger(__name__)
+@@ -24,6 +24,16 @@ def create_order(body: OrderCreate, user: CurrentUser = Depends(auth.get_current
+     return orders.to_out(orders.get_order(order_id))
+ 
+ 
++@router.post("/quote", response_model=Quote)
++def quote_order(body: OrderCreate, user: CurrentUser = Depends(auth.get_current_user)):
++    try:
++        return pricing.quote_checkout(body.items, body.discount_code)
++    except inventory.UnknownSku:
++        raise HTTPException(status_code=404, detail="Unknown item")
++    except pricing.UnknownDiscountCode:
++        raise HTTPException(status_code=400, detail="Unknown discount code")
++
++
+ @router.get("", response_model=list[OrderOut])
+ def list_orders(user: CurrentUser = Depends(auth.get_current_user)):
+     return [orders.to_out(o) for o in orders.list_orders(user.id)]
+diff --git a/app/services/pricing.py b/app/services/pricing.py
+index 886f263..5d7fa7a 100644
+--- a/app/services/pricing.py
++++ b/app/services/pricing.py
+@@ -4,7 +4,8 @@ from __future__ import annotations
+ from decimal import Decimal
+ 
+ from app import db
+-from app.models import to_money
++from app.models import OrderItemIn, Quote, to_money
++from app.services import inventory
+ from app.settings import get_settings
+ 
+ HUNDRED = Decimal("100")
+@@ -48,3 +49,25 @@ def get_order_total(order_id: int) -> Decimal:
+     if order["discount_code"]:
+         amount = apply_discount(amount, get_discount_percent(order["discount_code"]))
+     return to_money(amount + calculate_tax(amount))
++
++
++def quote_checkout(items: list[OrderItemIn], discount_code: str | None = None) -> Quote:
++    """Price a basket before an order exists, so checkout can show the discount and tax up front."""
++    subtotal = 0.0
++    for item in items:
++        stocked = inventory.get_item(item.sku)
++        if stocked is None:
++            raise inventory.UnknownSku(item.sku)
++        subtotal += float(stocked.price) * item.quantity
++    discount = 0.0
++    if discount_code:
++        percent = float(get_discount_percent(discount_code))
++        discount = subtotal * percent / 100
++    taxable = subtotal - discount
++    tax = taxable * float(get_settings().tax_rate)
++    return Quote(
++        subtotal=round(subtotal, 2),
++        discount=round(discount, 2),
++        tax=round(tax, 2),
++        total=round(taxable + tax, 2),
++    )
+diff --git a/tests/test_checkout_quote.py b/tests/test_checkout_quote.py
+new file mode 100644
+index 0000000..44e6520
+--- /dev/null
++++ b/tests/test_checkout_quote.py
+@@ -0,0 +1,43 @@
++from decimal import Decimal
++
++import pytest
++
++from app import db
++
++
++@pytest.fixture
++def catalog():
++    db.execute("INSERT INTO inventory (sku, name, price, stock) VALUES ('W-1', 'Widget', '10.00', 20)")
++    db.execute("INSERT INTO discount_codes (code, percent_off) VALUES ('SAVE25', '25')")
++
++
++def _quote(client, headers, **body):
++    body.setdefault("items", [{"sku": "W-1", "quantity": 2}])
++    return client.post("/orders/quote", json=body, headers=headers)
++
++
++def test_quote_requires_authentication(client):
++    assert client.post("/orders/quote", json={"items": [{"sku": "W-1", "quantity": 1}]}).status_code == 401
++
++
++def test_quote_without_a_code_adds_tax_only(client, catalog, create_user, auth_headers):
++    resp = _quote(client, auth_headers(create_user()))
++    assert resp.status_code == 200
++    body = resp.json()
++    assert Decimal(body["subtotal"]) == Decimal("20.00")
++    assert Decimal(body["discount"]) == Decimal("0.00")
++    assert Decimal(body["total"]) == Decimal("21.65")
++
++
++def test_quote_applies_a_percentage_code_before_tax(client, catalog, create_user, auth_headers):
++    resp = _quote(client, auth_headers(create_user()), discount_code="SAVE25")
++    body = resp.json()
++    assert Decimal(body["discount"]) == Decimal("5.00")
++    assert Decimal(body["tax"]) == Decimal("1.24")
++    assert Decimal(body["total"]) == Decimal("16.24")
++
++
++def test_quote_rejects_unknown_codes_and_items(client, catalog, create_user, auth_headers):
++    headers = auth_headers(create_user())
++    assert _quote(client, headers, discount_code="NOPE").status_code == 400
++    assert _quote(client, headers, items=[{"sku": "X-9", "quantity": 1}]).status_code == 404

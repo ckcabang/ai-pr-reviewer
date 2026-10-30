@@ -1,0 +1,28 @@
+issues:
+  - id: pr12-1
+    file: app/services/inventory.py
+    line_hint: 45            # the absolute `UPDATE inventory SET stock = ?` after a separate read
+    area: correctness
+    severity: high
+    requires: cross_file
+    description: >-
+      reserve_for_cart reads the stock with get_item and then writes back `item.stock - quantity`
+      outside any transaction. Two concurrent reservations both read the same stock and the second
+      write overwrites the first, so more units are handed out than exist (oversell). The existing
+      `inventory.reserve` already does this atomically (a conditional UPDATE inside
+      `db.transaction()`), and the new function bypasses it.
+    related:
+      - file: app/services/inventory.py
+        line_hint: 30
+  - id: pr12-2
+    file: app/services/inventory.py
+    line_hint: 43            # `if item.stock < 0:` out-of-stock guard
+    area: correctness
+    severity: medium
+    requires: diff
+    description: >-
+      The out-of-stock guard tests `item.stock < 0`, which the schema's CHECK constraint makes
+      impossible, so it never fires. A sold-out item (stock 0) or a request larger than the
+      remaining stock passes the check, and the write then violates the CHECK constraint and
+      surfaces as a 500 instead of the intended 409. The guard should compare the stock with the
+      requested quantity.

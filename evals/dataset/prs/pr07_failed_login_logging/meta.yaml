@@ -1,0 +1,11 @@
+id: pr07
+title: Log failed login attempts
+description: |
+  Support keeps asking why a customer "can't log in", and the only thing we log today is the email.
+  This adds more context to the failed-login warning so we can tell the two failure cases apart.
+
+  - Unknown account and wrong password are now separate branches with separate log lines (the
+    client still gets the same 401 either way).
+  - For a known account the log line includes the user id; both lines include the login request
+    details.
+  - Tests check the log output for the unknown-account, wrong-password and successful cases.
