@@ -1,0 +1,38 @@
+# Reviewer configuration. The only environment input is the API key, read from the
+# variable named in llm.api_key_env. Model names live here and nowhere in code (D10, D13).
+llm:
+  base_url: null              # null = OpenAI default. At work: the internal gateway URL.
+  api_key_env: OPENAI_API_KEY # name of the env var holding the key
+  ca_bundle: null             # path to a corporate CA bundle, if needed
+  timeout_s: 120
+  max_retries: 3              # backoff retries on rate limits (429) and server errors (5xx)
+  json_mode: true             # response_format={"type": "json_object"}; set false for gateways without it
+
+models:
+  specialist: gpt-6.1-terra
+  verifier: gpt-6.1-sol
+  baseline: gpt-6.1-terra     # same as specialist, for fairness
+  judge: gpt-4.1              # eval only
+  embedding: text-embedding-3-small
+
+pricing_per_1m_tokens:        # USD, from OpenAI's pricing page (Oct 2026); used for cost estimates
+  gpt-6.1-terra: {input: 1.00, output: 5.00}
+  gpt-6.1-sol: {input: 2.00, output: 10.00}
+  gpt-4.1: {input: 2.00, output: 8.00}
+  text-embedding-3-small: {input: 0.02, output: 0.00}
+
+context:
+  semantic: {enabled: true, top_k: 8}
+  callgraph: {enabled: true, max_callers: 5, max_callees: 5}
+  max_context_chars: 40000
+
+pipeline:
+  max_workers: 4
+  max_findings_per_agent: 5
+  confidence_threshold: 0.6
+  action_required: {severities: [critical, high], min_confidence: 0.75}
+  max_findings_total: 10
+
+cache:
+  enabled: true
+  dir: .cache                 # relative paths resolve against this file's directory

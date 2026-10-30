@@ -221,3 +221,19 @@ def _unquote(raw: str) -> str:
         out += ch.encode()
         i += 1
     return out.decode("utf-8", errors="replace")
+
+
+def render_numbered_diff(files: list[FileDiff]) -> str:
+    """Render files as a diff with a new-file line-number gutter, so a reviewer can cite
+    real line numbers. Added and context lines carry their new-side number; deleted lines
+    have a blank gutter."""
+    out: list[str] = []
+    for f in files:
+        label = f"{f.path} ({f.change_type}" + (f" from {f.old_path})" if f.old_path else ")")
+        out.append(f"=== {label}")
+        for hunk in f.hunks:
+            out.append(f"      {hunk.header}")
+            for marker, n, text in hunk.lines:
+                gutter = f"{n:>5}" if n is not None else "     "
+                out.append(f"{gutter} {marker}{text}")
+    return "\n".join(out)
