@@ -108,7 +108,8 @@ def run_verifier(
     as `<context>` so it can check claims about callers and callees. Empty = no section."""
     if not findings:
         return VerifierRun(findings=[])
-    rules, do_not_flag = load_rules(review_input)
+    # context.enabled: false (the no-context ablation) means no rules either, as for the specialists (D36, D44).
+    rules, do_not_flag = load_rules(review_input) if config.context.enabled else ("", "")
     added = {f.path: set(f.added_lines) for f in files}
     batches = split_batches(findings)
 

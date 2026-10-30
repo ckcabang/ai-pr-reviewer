@@ -6,7 +6,7 @@ arm, and an ablation is a function that calls `review` with a modified copy of `
 
 To add an arm, register it in `ARMS`:
 
-    ARMS["pipeline_no_verifier"] = Arm("pipeline_no_verifier", my_ablation_fn, "...")          # #14
+    ARMS["my_arm"] = Arm("my_arm", my_fn, "...")
 
 `pipeline` (registered below) is `reviewer.pipeline.review` itself, the CLI's entry point (#12).
 
@@ -42,10 +42,29 @@ class Arm:
         return self.review(review_input, provider=provider, config=config)
 
 
+def review_no_verifier(review_input: ReviewInput, *, provider: Provider, config: Config) -> ReviewResult:
+    """Ablation: context + specialists + triage; the verifier makes no call and every finding is kept
+    at its own confidence (D44)."""
+    return review(review_input, provider=provider, config=config, verify=False)
+
+
+def review_no_context(review_input: ReviewInput, *, provider: Provider, config: Config) -> ReviewResult:
+    """Ablation: the diff only. No code context and no team rules for the specialists, and none for the
+    verifier; specialists, verifier and triage otherwise as in the pipeline (D44). Works on a copy of
+    `config`, so other arms and the caller's config are untouched."""
+    config = config.model_copy(deep=True)
+    config.context.enabled = False
+    return review(review_input, provider=provider, config=config)
+
+
 ARMS: dict[str, Arm] = {
     "baseline": Arm("baseline", review_baseline, "one diff-only prompt, merged checklist, scored raw (D6, D7)"),
     # The product itself: the same entry point the CLI calls (Seam 1), so the eval measures what ships.
     "pipeline": Arm("pipeline", review, "context + three specialists + verifier + triage; non-dropped findings scored"),
+    "pipeline_no_verifier": Arm("pipeline_no_verifier", review_no_verifier,
+                                "pipeline without the verifier: every finding kept at its own confidence (D44)"),
+    "pipeline_no_context": Arm("pipeline_no_context", review_no_context,
+                               "pipeline on the diff alone: no code context, no team rules, for specialists or verifier (D44)"),
 }
 
 
