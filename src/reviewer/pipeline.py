@@ -42,7 +42,7 @@ def review(review_input: ReviewInput, *, provider: Provider, config: Config, ver
         return ReviewResult(findings=[], stats=_stats({}, [], 0, time.perf_counter() - started, config))
 
     log.info("reviewing %d file(s) with %d specialist(s)", len(files), len(SPECIALISTS))
-    bundle = build_context(review_input, files, config)  # context engine (#5): same bundle for every specialist
+    bundle = build_context(review_input, files, config, provider)  # context engine (#5): same bundle for every specialist
     runs: dict[str, tuple[SpecialistRun | Exception, float]] = {}
 
     def work(spec: SpecialistSpec):

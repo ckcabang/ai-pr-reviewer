@@ -72,6 +72,7 @@ def diff_of():
 def config() -> Config:
     cfg = load_config()
     cfg.cache.enabled = False
+    cfg.context.semantic.enabled = False  # embeddings add blocks; tests/test_semantic.py turns them on
     return cfg
 
 

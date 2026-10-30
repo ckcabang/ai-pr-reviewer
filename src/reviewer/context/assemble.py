@@ -1,9 +1,9 @@
 """Build the context bundle a specialist receives next to the diff.
 
 Priority order, highest first: changed functions, their callers, their callees, then
-(later, #15) semantic matches. Blocks are added in that order until the character budget
-runs out; the first block that does not fit is truncated and everything after it is left
-out, so the lowest priority always goes first. The team rules and the don't-flag list are
+semantic matches (embeddings, optional). Blocks are added in that order until the character
+budget runs out; the first block that does not fit is truncated and everything after it is
+left out, so the lowest priority always goes first. The team rules and the don't-flag list are
 small and always included in full (outside the budget).
 
 Every code block is headed `path:start-end (reason)` and numbered with the real file line
@@ -14,15 +14,19 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from reviewer.context.callgraph import RepoIndex, is_test_file
 from reviewer.context.chunker import Chunk, SourceFile
 from reviewer.context.rules import Rules, load_rules
+from reviewer.context.semantic import semantic_matches
 from reviewer.diff import FileDiff
+from reviewer.llm import CachedProvider
 
 if TYPE_CHECKING:
     from reviewer.config import Config
+    from reviewer.llm import Provider
     from reviewer.models import ReviewInput
 
 log = logging.getLogger("reviewer")
@@ -63,15 +67,19 @@ class ContextBundle:
         return "\n\n".join(parts) if parts else "(empty context bundle)"
 
 
-def build_context(review_input: "ReviewInput", files: list[FileDiff], config: "Config") -> ContextBundle:
-    """The context bundle for a change. Disabled by `context.enabled: false` (the no-context ablation)."""
+def build_context(review_input: "ReviewInput", files: list[FileDiff], config: "Config",
+                  provider: "Provider | None" = None) -> ContextBundle:
+    """The context bundle for a change. Disabled by `context.enabled: false` (the no-context
+    ablation). `provider` is used only for embeddings (semantic search); without one, or with
+    `context.semantic.enabled: false`, no embedding call is made."""
     cfg = config.context
     if not cfg.enabled:
         return ContextBundle(stats={"enabled": False})
     rules = load_rules(review_input.repo_root, review_input.review_rules_path, review_input.base_ref)
     stats: dict = {"enabled": True, "rules": len(rules.rules), "do_not_flag": len(rules.do_not_flag)}
     try:
-        blocks, counts = select_blocks(review_input.repo_root, files, config)
+        query = f"{review_input.title}\n{review_input.description}\n{review_input.diff}"  # what semantic search matches
+        blocks, counts = select_blocks(review_input.repo_root, files, config, provider=provider, query=query)
     except Exception as e:  # a bug here must not cost the review: fall back to rules only
         log.warning("context engine failed, continuing without code context: %s", e)
         blocks, counts, stats["error"] = [], {}, f"{type(e).__name__}: {e}"
@@ -88,7 +96,8 @@ def _bundle(code: str, rules: Rules, stats: dict) -> ContextBundle:
 
 # -- selection --------------------------------------------------------------------------
 
-def select_blocks(root, files: list[FileDiff], config: "Config") -> tuple[list[Block], dict]:
+def select_blocks(root, files: list[FileDiff], config: "Config", *, provider: "Provider | None" = None,
+                  query: str = "") -> tuple[list[Block], dict]:
     """Choose what to show, in priority order, before the budget is applied."""
     cfg = config.context
     index = RepoIndex.build(root)
@@ -116,17 +125,30 @@ def select_blocks(root, files: list[FileDiff], config: "Config") -> tuple[list[B
             for callee in index.callees(c, exclude=changed_keys, limit=cfg.callgraph.max_callees):
                 selection.add("callee", callee, f"called by changed {_label(c)}")
 
-    # EXTENSION POINT (#15, semantic search): add the lowest-priority blocks here, after the
-    # callees, so the budget drops them first:
-    #     for chunk in semantic_matches(...):  # skip anything already in `selection`
-    #         selection.add("semantic", chunk, "similar code (semantic match)")
-    # `selection.keys` holds the (file, qualname) of every chunk already chosen.
+    errors: dict[str, str] = {}
+    if cfg.semantic.enabled and provider is not None:
+        try:  # embeddings are optional: a gateway without an endpoint must not cost the review its context
+            for chunk, score in semantic_matches(
+                index, query, provider=provider, model=config.models.embedding, top_k=cfg.semantic.top_k,
+                exclude=selection.keys, root=Path(root), cache_dir=_embedding_cache_dir(provider),
+            ):
+                selection.add("semantic", chunk, f"semantic match, similarity {score:.2f}")
+        except Exception as e:
+            log.warning("semantic search failed, continuing without it (set context.semantic.enabled: false "
+                        "if the endpoint has no embeddings): %s", e)
+            errors["semantic_error"] = f"{type(e).__name__}: {e}"
 
     kinds = [b.kind for b in selection.blocks]
     counts = {"indexed_files": len(index.files), "changed_functions": len(changed),
               "callers": kinds.count("caller"), "callees": kinds.count("callee"),
-              "semantic_matches": kinds.count("semantic")}
+              "semantic_matches": kinds.count("semantic"), **errors}
     return selection.ordered(), counts
+
+
+def _embedding_cache_dir(provider: "Provider") -> Path | None:
+    """Where per-file embeddings are cached: next to the provider's own cache, so `--no-cache`,
+    `cache.enabled: false` and the eval harness (which always runs uncached) switch both off together."""
+    return provider.directory if isinstance(provider, CachedProvider) else None
 
 
 class _Selection:

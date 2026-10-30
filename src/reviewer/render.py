@@ -70,8 +70,9 @@ def _context_lines(c: dict | None) -> list[str]:
     if not c or not c.get("enabled"):
         return ["- Context: off (diff only)"] if c else []
     omitted = f", {c['omitted_blocks']} left out for the budget" if c.get("omitted_blocks") else ""
+    semantic = f"{c['semantic_matches']} semantic, " if c.get("semantic_matches") else ""
     return [f"- Context: {c.get('changed_functions', 0)} changed, {c.get('callers', 0)} callers, "
-            f"{c.get('callees', 0)} callees, {c.get('rules', 0)} rules ({c.get('chars', 0)} chars{omitted})"]
+            f"{c.get('callees', 0)} callees, {semantic}{c.get('rules', 0)} rules ({c.get('chars', 0)} chars{omitted})"]
 
 
 def _stats_md(stats: dict) -> str:
