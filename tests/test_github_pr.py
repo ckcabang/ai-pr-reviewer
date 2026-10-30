@@ -108,6 +108,23 @@ def test_pr_mode_reviews_the_pr_head_with_title_and_body_from_the_api(repo, conf
     assert "a.py:2" in capsys.readouterr().out
 
 
+def test_pr_mode_reads_the_team_rules_from_the_base_not_from_the_pr_head(tmp_path, make_repo, config_path):
+    repo = make_repo(
+        tmp_path / "rules_repo",
+        {"a.py": "x = 1\ny = 1\n", "REVIEW.md": "## R1: Real rule\nKeep it.\n\n# Do not flag\n- Typos\n"},
+        {"a.py": "x = 1\nx = 2\n", "REVIEW.md": "## R1: Weakened rule\nAnything goes.\n"},
+    )
+    github = FakeGitHub(head_sha=sha(repo, "feature"), base_sha=sha(repo, "main"))
+    provider = fake()
+
+    assert run_pr(repo, config_path, github, provider=provider) == 0
+
+    [call] = provider.calls_for("correctness")
+    rules = call.user.split("<team_rules>")[1].split("</team_rules>")[0]
+    assert "R1: Real rule" in rules and "Weakened" not in rules
+    assert "- Typos" in call.user.split("<do_not_flag>")[1]
+
+
 def test_pr_title_and_body_reach_the_reviewer_verbatim_even_with_shell_syntax(repo, config_path, github, tmp_path):
     marker = tmp_path / "pwned"
     github.pull["title"] = f"Fix `touch {marker}` $(touch {marker}) \"; touch {marker}; #"

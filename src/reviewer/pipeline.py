@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from reviewer.agents.base import SpecialistRun, SpecialistSpec, run_specialist
 from reviewer.agents.correctness import CORRECTNESS
 from reviewer.config import Config
+from reviewer.context import build_context
 from reviewer.diff import parse_diff
 from reviewer.llm import Provider, Usage
 from reviewer.models import SEVERITY_ORDER, ReviewInput, ReviewResult
@@ -41,13 +42,15 @@ def review(review_input: ReviewInput, *, provider: Provider, config: Config, ver
         return ReviewResult(findings=[], stats=_stats({}, [], 0, time.perf_counter() - started, config))
 
     log.info("reviewing %d file(s) with %d specialist(s)", len(files), len(SPECIALISTS))
+    bundle = build_context(review_input, files, config)  # context engine (#5): same bundle for every specialist
     runs: dict[str, tuple[SpecialistRun | Exception, float]] = {}
 
     def work(spec: SpecialistSpec):
         t0 = time.perf_counter()
         try:
             run: SpecialistRun | Exception = run_specialist(
-                spec, review_input=review_input, files=files, provider=provider, config=config
+                spec, review_input=review_input, files=files, provider=provider, config=config,
+                bundle=bundle,
             )
         except Exception as e:  # one specialist failing must not lose the others (spec story 44)
             run = e
@@ -85,6 +88,7 @@ def review(review_input: ReviewInput, *, provider: Provider, config: Config, ver
     stats = _stats(runs, [f.path for f in files], len(triaged.findings), time.perf_counter() - started, config)
     stats["counts"]["after_verifier"] = after_verifier
     stats["counts"]["after_triage"] = sum(1 for f in triaged.findings if f.triage != "dropped")
+    stats["context"] = bundle.stats  # context engine (#5)
     stats.setdefault("stages", {}).update({
         "verifier": _verifier_stats(vrun, len(findings), verifier_wall, config),
         "triage": {"dropped_by_reason": triaged.dropped_by_reason, "cap_removed": triaged.cap_removed},

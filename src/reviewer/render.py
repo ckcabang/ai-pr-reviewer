@@ -66,6 +66,14 @@ def _stage_lines(stages: dict, counts: dict) -> list[str]:
     return out
 
 
+def _context_lines(c: dict | None) -> list[str]:
+    if not c or not c.get("enabled"):
+        return ["- Context: off (diff only)"] if c else []
+    omitted = f", {c['omitted_blocks']} left out for the budget" if c.get("omitted_blocks") else ""
+    return [f"- Context: {c.get('changed_functions', 0)} changed, {c.get('callers', 0)} callers, "
+            f"{c.get('callees', 0)} callees, {c.get('rules', 0)} rules ({c.get('chars', 0)} chars{omitted})"]
+
+
 def _stats_md(stats: dict) -> str:
     totals = stats.get("totals", {})
     counts = stats.get("counts", {})
@@ -75,6 +83,7 @@ def _stats_md(stats: dict) -> str:
         "<summary>Review stats</summary>",
         "",
         f"- Files reviewed: {len(stats.get('files_reviewed', []))}",
+        *_context_lines(stats.get("context")),
         f"- Findings: {counts.get('raw', 0)} raw → {counts.get('after_triage', 0)} kept",
         f"- Tokens: {totals.get('input_tokens', 0)} in / {totals.get('output_tokens', 0)} out",
         f"- Estimated cost: ${totals.get('cost_usd', 0.0):.4f}",

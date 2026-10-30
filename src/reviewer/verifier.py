@@ -16,6 +16,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from reviewer.config import Config
+from reviewer.context.rules import load_rules as read_rules
 from reviewer.diff import FileDiff
 from reviewer.llm import Provider, Usage, chat_validated
 from reviewer.models import Finding, ReviewInput, Severity, Verdict, VerifiedFinding
@@ -235,21 +236,9 @@ def _defang(text: str) -> str:
     return re.sub(r"</?\s*(finding|team_rules|do_not_flag)\b", lambda m: m.group(0).replace("<", "&lt;"), text)
 
 
-_DNF_HEADING = re.compile(r"^#{1,3}\s*do[ -]?not[ -]flag\b.*$", re.IGNORECASE | re.MULTILINE)
-
-
 def load_rules(review_input: ReviewInput) -> tuple[str, str]:
-    """(rules text, don't-flag text) from REVIEW.md, or empty strings if there is none.
-
-    Minimal reader: splits at the "Do not flag" heading. Unify with the context
-    bundle's rules parser (#5) when both land."""
-    path = review_input.review_rules_path or review_input.repo_root / "REVIEW.md"
-    try:
-        text = Path(path).read_text()
-    except OSError:
-        return "", ""
-    m = _DNF_HEADING.search(text)
-    if not m:
-        return text.strip(), ""
-    return text[: m.start()].strip(), text[m.end():].strip()
+    """(team rules, don't-flag list) as prompt text. The one rules reader, shared with the
+    context bundle: explicit path, else REVIEW.md at the base revision, else the checkout's (D36)."""
+    rules = read_rules(review_input.repo_root, review_input.review_rules_path, review_input.base_ref)
+    return rules.render_rules(), rules.render_do_not_flag()
 

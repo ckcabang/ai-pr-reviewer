@@ -23,8 +23,13 @@ class ReviewInput(BaseModel):
     """Unified diff (base...head), git's standard a/ b/ prefix format."""
     title: str = ""
     description: str = ""
+    base_ref: str | None = None
+    """Base revision (ref or SHA) the change is reviewed against. The default team rules are
+    read from here (`git show <base_ref>:REVIEW.md`), so a change cannot edit the rules it is
+    judged by; the checkout is only the fallback when the base has no rules file."""
     review_rules_path: Path | None = None
-    """Defaults to <repo_root>/REVIEW.md. Not read yet in the walking skeleton."""
+    """Team rules file, used as given (an unreadable path is an error). Without it: REVIEW.md
+    at `base_ref`, else <repo_root>/REVIEW.md, else no rules."""
 
 
 class FindingDraft(BaseModel):
