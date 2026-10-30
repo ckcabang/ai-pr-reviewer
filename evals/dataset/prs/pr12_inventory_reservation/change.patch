@@ -1,0 +1,95 @@
+diff --git a/app/models.py b/app/models.py
+index bd16079..9d2d604 100644
+--- a/app/models.py
++++ b/app/models.py
+@@ -87,6 +87,10 @@ class RestockRequest(BaseModel):
+     quantity: int = Field(gt=0)
+ 
+ 
++class ReserveRequest(BaseModel):
++    quantity: int = Field(gt=0, le=100)
++
++
+ class Invoice(BaseModel):
+     order_id: int
+     lines: list[str]
+diff --git a/app/routes/inventory.py b/app/routes/inventory.py
+index 21ca4a9..0dd6256 100644
+--- a/app/routes/inventory.py
++++ b/app/routes/inventory.py
+@@ -3,7 +3,7 @@ from __future__ import annotations
+ from fastapi import APIRouter, Depends, HTTPException
+ 
+ from app import auth
+-from app.models import CurrentUser, InventoryOut, RestockRequest
++from app.models import CurrentUser, InventoryOut, ReserveRequest, RestockRequest
+ from app.services import inventory
+ 
+ router = APIRouter(prefix="/inventory", tags=["inventory"])
+@@ -23,3 +23,14 @@ def restock(sku: str, body: RestockRequest, admin: CurrentUser = Depends(auth.re
+         return inventory.restock(sku, body.quantity)
+     except inventory.UnknownSku:
+         raise HTTPException(status_code=404, detail="Unknown item")
++
++
++@router.post("/{sku}/reserve", response_model=InventoryOut)
++def reserve(sku: str, body: ReserveRequest, user: CurrentUser = Depends(auth.get_current_user)):
++    """Hold stock for the shopper's cart while they check out."""
++    try:
++        return inventory.reserve_for_cart(sku, body.quantity)
++    except inventory.UnknownSku:
++        raise HTTPException(status_code=404, detail="Unknown item")
++    except inventory.OutOfStock:
++        raise HTTPException(status_code=409, detail="Insufficient stock")
+diff --git a/app/services/inventory.py b/app/services/inventory.py
+index 519010f..4f117ca 100644
+--- a/app/services/inventory.py
++++ b/app/services/inventory.py
+@@ -35,6 +35,17 @@ def reserve(sku: str, quantity: int) -> None:
+             raise OutOfStock(sku)
+ 
+ 
++def reserve_for_cart(sku: str, quantity: int) -> InventoryOut:
++    """Hold `quantity` units for a shopper's cart and return the item with its remaining stock."""
++    item = get_item(sku)
++    if item is None:
++        raise UnknownSku(sku)
++    if item.stock < 0:
++        raise OutOfStock(sku)
++    db.execute("UPDATE inventory SET stock = ? WHERE sku = ?", (item.stock - quantity, sku))
++    return get_item(sku)
++
++
+ def reserve_items(items: list[OrderItemIn]) -> None:
+     """Reserve every line or none: any failure rolls back the whole transaction."""
+     with db.transaction():
+diff --git a/tests/test_inventory.py b/tests/test_inventory.py
+new file mode 100644
+index 0000000..1bf52b0
+--- /dev/null
++++ b/tests/test_inventory.py
+@@ -0,0 +1,24 @@
++import pytest
++
++from app import db
++
++
++@pytest.fixture
++def stocked():
++    db.execute("INSERT INTO inventory (sku, name, price, stock) VALUES ('W-1', 'Widget', '10.00', 5)")
++
++
++def test_reserve_requires_authentication(client, stocked):
++    assert client.post("/inventory/W-1/reserve", json={"quantity": 1}).status_code == 401
++
++
++def test_reserve_takes_units_out_of_stock(client, stocked, create_user, auth_headers):
++    headers = auth_headers(create_user())
++    resp = client.post("/inventory/W-1/reserve", json={"quantity": 2}, headers=headers)
++    assert resp.status_code == 200 and resp.json()["stock"] == 3
++    assert client.get("/inventory/W-1", headers=headers).json()["stock"] == 3
++
++
++def test_reserve_unknown_sku_is_404(client, create_user, auth_headers):
++    resp = client.post("/inventory/NOPE/reserve", json={"quantity": 1}, headers=auth_headers(create_user()))
++    assert resp.status_code == 404

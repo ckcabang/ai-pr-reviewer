@@ -1,0 +1,22 @@
+issues:
+  - id: pr14-1
+    file: app/routes/orders.py
+    line_hint: 34            # offset = page * page_size
+    area: correctness
+    severity: medium
+    requires: diff
+    description: >-
+      `page` is documented and validated as 1-based (`ge=1`, default 1), but the offset is computed
+      as `page * page_size`. Page 1 therefore skips the first `page_size` orders and every page is
+      shifted by one; with the default parameters the customer's oldest 20 orders are never
+      returned. The offset should be `(page - 1) * page_size`.
+  - id: pr14-2
+    file: app/routes/orders.py
+    line_hint: 30            # page_size: int = Query(default=20, ge=1)
+    area: correctness
+    severity: medium
+    requires: diff
+    description: >-
+      `page_size` has a lower bound but no upper bound (`le=`), so a caller can request
+      `page_size=1000000` and get the whole table in one response, defeating the purpose of
+      paginating and letting a single request load every order and its items.

@@ -1,0 +1,184 @@
+diff --git a/app/routes/refunds.py b/app/routes/refunds.py
+index b01b429..4fb7708 100644
+--- a/app/routes/refunds.py
++++ b/app/routes/refunds.py
+@@ -1,67 +1,27 @@
+ from __future__ import annotations
+ 
+-from decimal import Decimal
++from fastapi import APIRouter, Depends, HTTPException
+ 
+-from fastapi import APIRouter, Depends, Header, HTTPException
+-
+-from app import auth, db, idempotency
+-from app.clients import email_client, payment_gateway
+-from app.logging_setup import get_logger, redact
++from app import auth
++from app.logging_setup import get_logger
+ from app.models import CurrentUser, RefundRequest
+-from app.services import order_state, orders
++from app.services import orders, refunds
+ 
+ logger = get_logger(__name__)
+ router = APIRouter(prefix="/refunds", tags=["refunds"])
+ 
+ 
+ @router.post("")
+-def refund_order(
+-    body: RefundRequest,
+-    idempotency_key: str = Header(alias="Idempotency-Key"),
+-    user: CurrentUser = Depends(auth.get_current_user),
+-):
++def refund_order(body: RefundRequest, user: CurrentUser = Depends(auth.get_current_user)):
+     order = orders.get_order(body.order_id)
+     if order is None:
+         raise HTTPException(status_code=404, detail="Order not found")
+     auth.require_owner(order["user_id"], user)
+ 
+-    request_hash = idempotency.hash_request({"order_id": order["id"], "user_id": user.id})
+     try:
+-        saved = idempotency.check_and_store(idempotency_key, request_hash)
+-    except idempotency.IdempotencyConflict:
+-        raise HTTPException(status_code=409, detail="Idempotency-Key conflict")
+-    if saved is not None:
+-        return saved
+-    if not order_state.is_allowed(order["status"], "refunded"):
+-        idempotency.release(idempotency_key)
+-        raise HTTPException(status_code=409, detail="Order cannot be refunded in its current state")
+-
+-    payment = db.execute(
+-        "SELECT charge_id, amount FROM payments WHERE order_id = ?", (order["id"],)
+-    ).one()
+-    if payment is None:
+-        idempotency.release(idempotency_key)
++        return refunds.refund_order(order, user.email)
++    except refunds.NoPayment:
+         raise HTTPException(status_code=409, detail="Order has no payment to refund")
+-
+-    try:
+-        amount = Decimal(payment["amount"])
+-        logger.info("refunding payment %s", redact({"order_id": order["id"], "amount": str(amount)}))
+-        result = payment_gateway.refund(payment["charge_id"], amount)
+-        with db.transaction():
+-            db.execute(
+-                "INSERT INTO refunds (order_id, refund_id, amount) VALUES (?, ?, ?)",
+-                (order["id"], result["id"], str(amount)),
+-            )
+-            order_state.transition(order, "refunded")
+-        response = {"order_id": order["id"], "refund_id": result["id"], "amount": str(amount), "status": "refunded"}
+-        idempotency.save_response(idempotency_key, response)
+     except Exception:
+-        idempotency.release(idempotency_key)
+         logger.exception("refund failed for order %s", order["id"])
+         raise HTTPException(status_code=502, detail="Refund could not be processed")
+-
+-    try:
+-        email_client.send(user.email, "Your refund", f"We refunded ${amount} for order {order['id']}.")
+-    except email_client.EmailError:
+-        logger.exception("refund receipt email failed for order %s", order["id"])
+-    return response
+diff --git a/app/services/refunds.py b/app/services/refunds.py
+new file mode 100644
+index 0000000..4f1c88f
+--- /dev/null
++++ b/app/services/refunds.py
+@@ -0,0 +1,40 @@
++"""Refund flow: issue the refund at the gateway, record it, and mark the order refunded."""
++from __future__ import annotations
++
++from decimal import Decimal
++
++from app import db
++from app.clients import email_client, payment_gateway
++from app.logging_setup import get_logger, redact
++
++logger = get_logger(__name__)
++
++
++class NoPayment(LookupError):
++    """The order has no captured payment to refund."""
++
++
++def refund_order(order: dict, notify_email: str) -> dict:
++    """Refund the full captured amount of `order` and email the customer a receipt."""
++    payment = db.execute(
++        "SELECT charge_id, amount FROM payments WHERE order_id = ?", (order["id"],)
++    ).one()
++    if payment is None:
++        raise NoPayment(order["id"])
++
++    amount = Decimal(payment["amount"])
++    logger.info("refunding payment %s", redact({"order_id": order["id"], "amount": str(amount)}))
++    result = payment_gateway.refund(payment["charge_id"], amount)
++    with db.transaction():
++        db.execute(
++            "INSERT INTO refunds (order_id, refund_id, amount) VALUES (?, ?, ?)",
++            (order["id"], result["id"], str(amount)),
++        )
++        db.execute("UPDATE orders SET status = 'refunded' WHERE id = ?", (order["id"],))
++    order["status"] = "refunded"
++
++    try:
++        email_client.send(notify_email, "Your refund", f"We refunded ${amount} for order {order['id']}.")
++    except email_client.EmailError:
++        logger.exception("refund receipt email failed for order %s", order["id"])
++    return {"order_id": order["id"], "refund_id": result["id"], "amount": str(amount), "status": "refunded"}
+diff --git a/tests/test_refund_service.py b/tests/test_refund_service.py
+new file mode 100644
+index 0000000..ee55c80
+--- /dev/null
++++ b/tests/test_refund_service.py
+@@ -0,0 +1,53 @@
++import httpx
++import pytest
++
++from app import db
++from app.clients import email_client, payment_gateway
++from app.services import orders, refunds
++
++
++@pytest.fixture
++def gateway():
++    calls = []
++
++    def handler(request: httpx.Request) -> httpx.Response:
++        calls.append(request.url.path)
++        return httpx.Response(200, json={"id": "re_1"})
++
++    payment_gateway._transport = httpx.MockTransport(handler)
++    email_client._transport = httpx.MockTransport(lambda r: httpx.Response(202, json={}))
++    yield calls
++    payment_gateway._transport = None
++    email_client._transport = None
++
++
++def _paid_order(create_user, status="paid"):
++    user = create_user()
++    order_id = db.execute("INSERT INTO orders (user_id, status) VALUES (?, ?)", (user, status)).lastrowid
++    db.execute("INSERT INTO payments (order_id, charge_id, amount) VALUES (?, 'ch_1', '21.65')", (order_id,))
++    return orders.get_order(order_id)
++
++
++def test_refund_order_records_the_refund_and_marks_the_order(gateway, create_user):
++    order = _paid_order(create_user)
++
++    result = refunds.refund_order(order, "ann@example.com")
++
++    assert result == {"order_id": order["id"], "refund_id": "re_1", "amount": "21.65", "status": "refunded"}
++    assert gateway == ["/charges/ch_1/refunds"]
++    assert orders.get_order(order["id"])["status"] == "refunded"
++    assert db.execute("SELECT COUNT(*) AS n FROM refunds").one()["n"] == 1
++
++
++def test_refund_order_without_a_payment_raises(gateway, create_user):
++    user = create_user()
++    order_id = db.execute("INSERT INTO orders (user_id) VALUES (?)", (user,)).lastrowid
++    with pytest.raises(refunds.NoPayment):
++        refunds.refund_order(orders.get_order(order_id), "ann@example.com")
++    assert gateway == []
++
++
++def test_email_failure_does_not_fail_the_refund(gateway, create_user):
++    email_client._transport = httpx.MockTransport(lambda r: httpx.Response(500))
++    order = _paid_order(create_user)
++    assert refunds.refund_order(order, "ann@example.com")["status"] == "refunded"

@@ -1,0 +1,13 @@
+id: pr15
+title: Send order confirmation email
+description: |
+  Customers have no feedback after checkout other than the order JSON, so this sends a
+  confirmation email when an order is placed.
+
+  - `orders.send_confirmation(user_id, order_id)` looks up the customer's address and posts the
+    message to the email API.
+  - Called from `orders.create_order` once the items and stock are in place, so we only email for
+    orders that made it that far.
+  - A failed send is logged and does not block the order.
+  - Tests stub the outgoing call (autouse fixture in `conftest.py`) and check the recipient and
+    subject.

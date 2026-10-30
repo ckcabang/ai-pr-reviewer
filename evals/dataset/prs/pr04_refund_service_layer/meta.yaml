@@ -1,0 +1,12 @@
+id: pr04
+title: Refactor refund flow into service layer
+description: |
+  The refund route was doing everything itself (payment lookup, gateway call, DB writes, receipt
+  email), which made it hard to test without going through HTTP. This moves the work into a new
+  `services/refunds.py` so the route is just authentication, ownership and error mapping.
+
+  - New `refunds.refund_order(order, notify_email)` that looks up the payment, calls the gateway,
+    records the refund and marks the order `refunded` in one transaction, then sends the receipt.
+  - New `refunds.NoPayment` for orders without a captured payment (mapped to 409 by the route).
+  - The route keeps the generic 502 for anything unexpected.
+  - Service-level tests for the success path, a missing payment, and a failing receipt email.

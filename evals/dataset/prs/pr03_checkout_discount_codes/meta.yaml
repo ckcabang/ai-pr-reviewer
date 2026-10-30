@@ -1,0 +1,11 @@
+id: pr03
+title: Apply discount codes at checkout
+description: |
+  Checkout needs to show the discount and tax before an order is placed, so this adds
+  `POST /orders/quote`. It takes the same body as `POST /orders` (items plus an optional discount
+  code) and returns the subtotal, discount, tax and total for the basket without creating anything.
+
+  - New `pricing.quote_checkout`, which prices the basket from current inventory prices and
+    applies the percentage from the discount code before tax.
+  - New `Quote` response model.
+  - Tests for the plain basket, a percentage code (25% off a $20 basket), and unknown codes/items.

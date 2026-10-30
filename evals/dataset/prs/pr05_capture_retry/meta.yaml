@@ -1,0 +1,12 @@
+id: pr05
+title: Add retry to payment gateway capture
+description: |
+  Gateway hiccups (503s, connection resets) were failing checkout outright even though a second
+  attempt a moment later usually works. `capture` now goes through the same retry loop that
+  `get_charge` already uses (up to `MAX_ATTEMPTS`, `RETRY_DELAY_SECONDS` apart).
+
+  - `capture` retries transient failures.
+  - If every attempt fails, `capture` returns a placeholder `pending-<order id>` charge so the
+    order can still move forward; the real charge id is filled in when payments are reconciled.
+  - Replaced the "capture is not retried" test with tests for retry-then-succeed and for giving
+    up after `MAX_ATTEMPTS`.

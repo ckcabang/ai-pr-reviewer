@@ -1,0 +1,23 @@
+issues:
+  - id: pr03-1
+    file: app/services/pricing.py
+    line_hint: 61            # `subtotal += float(stocked.price) * item.quantity`
+    area: standards
+    severity: medium
+    rule_id: R3
+    requires: rules
+    description: >-
+      quote_checkout does its money math in float (float(stocked.price), float percent and tax
+      rate, round(..., 2)) instead of Decimal quantized with to_money. Binary floating point
+      accumulates rounding error, and the team rule is that money is Decimal dollars, never float.
+
+  - id: pr03-2
+    file: app/services/pricing.py
+    line_hint: 65            # `discount = subtotal * percent / 100` with no clamp
+    area: correctness
+    severity: high
+    requires: diff
+    description: >-
+      The discount percentage is applied without clamping it to 0..100 (unlike apply_discount, which
+      clamps). A discount code with percent_off above 100 yields a discount larger than the subtotal,
+      so the quoted total is negative; a negative percentage would increase the price.

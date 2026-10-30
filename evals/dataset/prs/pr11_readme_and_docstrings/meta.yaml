@@ -1,0 +1,10 @@
+id: pr11
+title: Update README and docstrings
+description: |
+  New teammates keep asking how the service fits together, so this adds a README and fills in
+  docstrings on the public helpers that had none. Documentation only, no behaviour changes.
+
+  - New `README.md`: layout, how to run it, configuration variables, money conventions, the order
+    lifecycle and the idempotency header on capture and refund.
+  - One-line docstrings on the auth, idempotency, db, pricing and order helpers and the order and
+    inventory route handlers.

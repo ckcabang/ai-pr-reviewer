@@ -1,0 +1,27 @@
+issues:
+  - id: pr05-1
+    file: app/clients/payment_gateway.py
+    line_hint: 59            # `_request("POST", "/charges", ..., retry=True)`
+    area: correctness
+    severity: critical
+    requires: diff
+    description: >-
+      capture now retries the POST /charges call, which is not idempotent at the gateway, and sends no
+      idempotency key. If the first attempt actually created the charge but the response was lost
+      (timeout, connection reset, 5xx after processing), the retry charges the customer a second
+      time. The previous docstring said capture must never be retried for this reason.
+    related:
+      - file: app/clients/payment_gateway.py
+        line_hint: 34
+
+  - id: pr05-2
+    file: app/clients/payment_gateway.py
+    line_hint: 60            # `except Exception:` / `pass`
+    area: correctness
+    severity: high
+    requires: diff
+    description: >-
+      After the final failed attempt the bare `except Exception: pass` swallows the error and capture
+      returns a fabricated {"id": "pending-<order>", "status": "captured"} result. The payments route
+      then records a payment and marks the order paid even though the customer was never charged, and
+      the failure is never surfaced as an error.
