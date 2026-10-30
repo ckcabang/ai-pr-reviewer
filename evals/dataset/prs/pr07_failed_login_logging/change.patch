@@ -1,0 +1,52 @@
+diff --git a/app/routes/users.py b/app/routes/users.py
+index 48873b2..e71b835 100644
+--- a/app/routes/users.py
++++ b/app/routes/users.py
+@@ -27,8 +27,11 @@ def register(body: UserCreate):
+ @router.post("/login")
+ def login(body: LoginRequest):
+     row = db.execute("SELECT id, password_hash FROM users WHERE email = ?", (body.email,)).one()
+-    if row is None or not auth.verify_password(body.password, row["password_hash"]):
+-        logger.warning("failed login for %s", body.email)
++    if row is None:
++        logger.warning("failed login attempt (unknown account): %s", body.model_dump())
++        raise HTTPException(status_code=401, detail="Invalid credentials")
++    if not auth.verify_password(body.password, row["password_hash"]):
++        logger.warning("failed login attempt for user %s: %s", row["id"], body.model_dump())
+         raise HTTPException(status_code=401, detail="Invalid credentials")
+     return {"token": auth.create_session(row["id"])}
+ 
+diff --git a/tests/test_login_logging.py b/tests/test_login_logging.py
+new file mode 100644
+index 0000000..1aff4f9
+--- /dev/null
++++ b/tests/test_login_logging.py
+@@ -0,0 +1,28 @@
++import logging
++
++
++def _register(client):
++    client.post("/users", json={"email": "ann@example.com", "full_name": "Ann", "password": "long-enough-pw"})
++
++
++def test_failed_login_for_unknown_account_is_logged(client, caplog):
++    with caplog.at_level(logging.WARNING, logger="app.routes.users"):
++        resp = client.post("/users/login", json={"email": "ghost@example.com", "password": "whatever-pw"})
++    assert resp.status_code == 401
++    assert "unknown account" in caplog.text and "ghost@example.com" in caplog.text
++
++
++def test_failed_login_for_known_account_is_logged_with_the_user_id(client, caplog):
++    _register(client)
++    with caplog.at_level(logging.WARNING, logger="app.routes.users"):
++        resp = client.post("/users/login", json={"email": "ann@example.com", "password": "wrong-password"})
++    assert resp.status_code == 401
++    assert "failed login attempt for user 1" in caplog.text
++
++
++def test_successful_login_is_not_logged_as_a_failure(client, caplog):
++    _register(client)
++    with caplog.at_level(logging.WARNING, logger="app.routes.users"):
++        resp = client.post("/users/login", json={"email": "ann@example.com", "password": "long-enough-pw"})
++    assert resp.status_code == 200
++    assert "failed login" not in caplog.text

@@ -1,0 +1,65 @@
+diff --git a/app/models.py b/app/models.py
+index bd16079..411175d 100644
+--- a/app/models.py
++++ b/app/models.py
+@@ -37,6 +37,10 @@ class UserUpdate(BaseModel):
+     full_name: Optional[str] = None
+ 
+ 
++class AddressUpdate(BaseModel):
++    shipping_address: str = Field(min_length=5, max_length=200)
++
++
+ class UserOut(BaseModel):
+     id: int
+     email: str
+diff --git a/app/routes/users.py b/app/routes/users.py
+index 48873b2..5c9e41b 100644
+--- a/app/routes/users.py
++++ b/app/routes/users.py
+@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
+ 
+ from app import auth, db
+ from app.logging_setup import get_logger
+-from app.models import CurrentUser, LoginRequest, UserCreate, UserOut, UserUpdate
++from app.models import AddressUpdate, CurrentUser, LoginRequest, UserCreate, UserOut, UserUpdate
+ 
+ logger = get_logger(__name__)
+ router = APIRouter(prefix="/users", tags=["users"])
+@@ -54,3 +54,14 @@ def update_user(user_id: int, body: UserUpdate, user: CurrentUser = Depends(auth
+     if body.full_name is not None:
+         db.execute("UPDATE users SET full_name = ? WHERE id = ?", (body.full_name, user_id))
+     return _load_user(user_id)
++
++
++@router.put("/{user_id}/address", response_model=UserOut)
++def update_shipping_address(user_id: int, body: AddressUpdate):
++    """Set the address that shipments for this user's orders are sent to."""
++    result = db.execute(
++        "UPDATE users SET shipping_address = ? WHERE id = ?", (body.shipping_address.strip(), user_id)
++    )
++    if result.rowcount == 0:
++        raise HTTPException(status_code=404, detail="User not found")
++    return _load_user(user_id)
+diff --git a/tests/test_shipping_address.py b/tests/test_shipping_address.py
+new file mode 100644
+index 0000000..a19ecbb
+--- /dev/null
++++ b/tests/test_shipping_address.py
+@@ -0,0 +1,16 @@
++def test_shipping_address_can_be_set_and_read_back(client, create_user, auth_headers):
++    user = create_user()
++    resp = client.put(f"/users/{user}/address", json={"shipping_address": " 12 Elm Street, Springfield "})
++    assert resp.status_code == 200
++    assert resp.json()["shipping_address"] == "12 Elm Street, Springfield"
++    assert client.get(f"/users/{user}", headers=auth_headers(user)).json()["shipping_address"] == "12 Elm Street, Springfield"
++
++
++def test_shipping_address_for_unknown_user_is_404(client):
++    resp = client.put("/users/999/address", json={"shipping_address": "12 Elm Street, Springfield"})
++    assert resp.status_code == 404
++
++
++def test_too_short_shipping_address_is_rejected(client, create_user):
++    user = create_user()
++    assert client.put(f"/users/{user}/address", json={"shipping_address": "x"}).status_code == 422
