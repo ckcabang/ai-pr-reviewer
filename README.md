@@ -54,8 +54,8 @@ You need [uv](https://docs.astral.sh/uv/getting-started/installation/), git and 
 git clone https://github.com/ckcabang/ai-pr-reviewer.git
 cd ai-pr-reviewer
 uv sync
-uv run pytest                       # offline, about 90 s; the dataset checks are most of it
-export OPENAI_API_KEY=sk-...        # or put it in .env and prefix commands with: uv run --env-file .env
+uv run pytest                       # offline, about a minute (405 tests; the dataset checks are most of it)
+export OPENAI_API_KEY=sk-...        # or put it in .env (gitignored) and use: uv run --env-file .env <command>
 ```
 
 **See the context a review would use (no API key, no cost).** `scripts/demo.sh` builds a throwaway git repo from a dataset PR; use it to make a repo to point the commands at:
