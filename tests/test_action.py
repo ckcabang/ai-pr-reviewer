@@ -3,7 +3,9 @@
 Nothing here runs GitHub; it pins the properties that matter for safety and for the PR-mode CLI
 contract (head-SHA checkout, no pull_request_target, no PR text in shell).
 """
+import os
 import re
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -87,3 +89,44 @@ def test_workflow_has_no_shell_steps_and_pins_actions_to_major_versions():
             continue  # the reviewer itself is referenced by branch until it is tagged
         assert re.fullmatch(r"[\w./-]+@v\d+", uses), uses
     assert "SHA" in WORKFLOW.read_text()  # the pinning note
+
+
+# --- the review step's exit handling (story 53: the check passes by default) ---------------------
+
+def _run_review_step(tmp_path, *, fail_on, exit_code, stderr="error: boom"):
+    """Run the action's real review script under bash with a stub `uv` that fails like the CLI."""
+    step = [s for s in _run_steps(_load(ACTION)["runs"]["steps"]) if "reviewer" in s["run"]][-1]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    uv = bin_dir / "uv"
+    uv.write_text(f'#!/usr/bin/env bash\nprintf %s "$FAKE_STDERR" >&2\nexit {exit_code}\n')
+    uv.chmod(0o755)
+    env = {"PATH": f"{bin_dir}:{os.environ['PATH']}", "HOME": str(tmp_path), "TMPDIR": str(tmp_path),
+           "ACTION_PATH": str(ROOT), "PR_URL": "https://github.com/o/r/pull/1", "GITHUB_TOKEN": "t",
+           "OPENAI_API_KEY": "k", "REVIEW_CONFIG": "", "REVIEW_FAIL_ON": fail_on, "FAKE_STDERR": stderr}
+    return subprocess.run(["bash", "-c", step["run"]], capture_output=True, text=True, env=env, cwd=tmp_path)
+
+
+def test_a_reviewer_error_only_warns_when_fail_on_is_never(tmp_path):
+    out = _run_review_step(tmp_path, fail_on="never", exit_code=2, stderr="error: invalid API key")
+    assert out.returncode == 0
+    assert "::warning" in out.stdout and "invalid API key" in out.stdout
+    assert "error: invalid API key" in out.stderr  # still in the log
+
+
+def test_the_warning_cannot_be_used_to_inject_workflow_commands(tmp_path):
+    evil = "error: oops\n::error::pwned\r\n::set-output name=x::y"
+    out = _run_review_step(tmp_path, fail_on="never", exit_code=2, stderr=evil)
+    assert out.returncode == 0
+    command_lines = [line for line in out.stdout.splitlines() if line.startswith("::")]
+    assert len(command_lines) == 1 and command_lines[0].startswith("::warning")
+
+
+def test_a_reviewer_error_still_fails_the_step_with_fail_on_action_required(tmp_path):
+    out = _run_review_step(tmp_path, fail_on="action_required", exit_code=2)
+    assert out.returncode == 2 and "::warning" not in out.stdout
+
+
+def test_action_required_findings_fail_the_step_only_when_asked_to(tmp_path):
+    assert _run_review_step(tmp_path, fail_on="action_required", exit_code=1).returncode == 1
+    assert _run_review_step(tmp_path, fail_on="never", exit_code=0).returncode == 0

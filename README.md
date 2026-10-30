@@ -165,7 +165,7 @@ jobs:
         with: {openai-api-key: "${{ secrets.OPENAI_API_KEY }}"}
 ```
 
-Inputs: `openai-api-key` (required), `github-token` (defaults to the workflow token), `config` (path to a reviewer config in the reviewed repo; default is this repo's `config.yaml`), `fail-on` (`never` by default, so the check always passes). Put a `REVIEW.md` at the root of the reviewed repo for team rules. It never uses `pull_request_target`, and PR text reaches the code only through the GitHub API, not a shell. Fork PRs get a read-only token and will fail to post. Every run is uncached and costs real money (about $0.04 for a small PR).
+Inputs: `openai-api-key` (required), `github-token` (defaults to the workflow token), `config` (path to a reviewer config in the reviewed repo; default is this repo's `config.yaml`), `fail-on` (`never` by default, so the check always passes: a reviewer error shows up as a `::warning::` annotation instead of a red check; `action_required` also fails the check on action-required findings or on errors). Put a `REVIEW.md` at the root of the reviewed repo for team rules. It never uses `pull_request_target`, and PR text reaches the code only through the GitHub API, not a shell. Fork PRs get a read-only token and will fail to post. Every run is uncached and costs real money (about $0.04 for a small PR).
 
 ## Work-laptop setup
 

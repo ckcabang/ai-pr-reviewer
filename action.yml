@@ -17,7 +17,7 @@ inputs:
     required: false
     default: ""
   fail-on:
-    description: "`action_required` fails the step when the review has action-required findings; `never` always passes."
+    description: "`action_required` fails the step when the review has action-required findings (or errors); `never` always passes, and a reviewer error becomes a warning."
     required: false
     default: never
 
@@ -50,4 +50,16 @@ runs:
         if [ -n "$REVIEW_CONFIG" ]; then
           args+=(--config "$REVIEW_CONFIG")
         fi
-        uv run --project "$ACTION_PATH" --frozen --no-dev reviewer "${args[@]}"
+        errfile="$(mktemp)"
+        status=0
+        uv run --project "$ACTION_PATH" --frozen --no-dev reviewer "${args[@]}" 2>"$errfile" || status=$?
+        cat "$errfile" >&2
+        # The check passes by default (fail-on: never): a reviewer error is a warning, not a red check.
+        # The message is flattened to one line first, so error text can never start a workflow command.
+        if [ "$status" -ne 0 ] && [ "$REVIEW_FAIL_ON" = "never" ]; then
+          msg="$(tr '\r\n' '  ' < "$errfile" | cut -c1-500)"
+          msg="${msg//%/%25}"
+          echo "::warning title=AI review failed::The review did not complete and the check was left passing (fail-on: never). ${msg}"
+          exit 0
+        fi
+        exit "$status"
