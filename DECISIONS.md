@@ -116,3 +116,7 @@ The judge model only scores "same underlying problem?" per (expected issue, find
 
 ## D34: Eval scoring rules
 Only findings that are not `dropped` are judged (what a user would see); dropped ones stay in the results for debugging. Metrics are pooled over PRs within a run (micro-averaged), then mean and sample std over runs (std is null for one run); undefined ratios (no findings, no expected issues in a bucket) are null, never 0. A review or judge call that fails is recorded (`status: error | judge_error`), excluded from the metrics and reported loudly, never scored as an empty review. Arms are plain functions registered in `evals.arms.ARMS`; `results.json` is the single source for the scorecard, which re-derives every metric from the raw records.
+
+
+## D35: Scorecard examples are chosen by rule; the page is static and self-contained
+`evals.scorecard.render_html` writes one HTML file with inline CSS and SVG only (no script, no external request) and re-derives every number from the raw records. The two example findings are not hand-picked: they are the planted issues the `pipeline` arm found (first run that matched), ranked by how rarely the `baseline` found them, then by how reliably the pipeline did, on different PRs where possible, shown next to the baseline findings on the same PR and run. The page says so. Arm names are shown as given; bars use a fixed colour per arm position. No pipeline arm, or no pipeline match, degrades to a plain note, not an error.
