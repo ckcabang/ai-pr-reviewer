@@ -8,14 +8,11 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "fastapi>=0.162.0",
-    "httpx>=0.28.1",
     "httpx2>=2.14.0",
     "numpy>=2.2.6",
     "openai>=3.41.0",
     "pydantic>=2.14.2",
     "pyyaml>=6.0.3",
-    "uvicorn>=0.54.0",
 ]
 
 [project.scripts]
@@ -31,6 +28,11 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "pytest>=9.2.0",
+    # the demo service (demo_service/) and its tests; the reviewer itself does not need them,
+    # so `uv sync --no-dev` (the Action) leaves them out
+    "fastapi>=0.162.0",
+    "httpx>=0.28.1",
+    "uvicorn>=0.54.0",
 ]
 
 [tool.pytest.ini_options]
