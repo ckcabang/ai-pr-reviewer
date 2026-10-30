@@ -223,7 +223,7 @@ context:
   max_context_chars: 40000
 pipeline:
   max_workers: 4
-  max_findings_per_specialist: 5
+  max_findings_per_agent: 5
   confidence_threshold: 0.6
   action_required: {severities: [critical, high], min_confidence: 0.75}
   max_findings_total: 10
@@ -274,7 +274,7 @@ Every specialist shares this scaffolding (`base.py`):
   - `<context>` (line-numbered)
   - `<team_rules>`, `<do_not_flag>`
 - **Required behaviors:**
-  - Return `{"findings": [...]}` and at most `max_findings_per_specialist` findings.
+  - Return `{"findings": [...]}` and at most `max_findings_per_agent` findings.
   - An **empty list is a valid, good answer** when nothing qualifies. Say this explicitly.
   - Every finding must quote the exact offending code in `evidence` and cite a `line` that exists in the provided numbered code. Prefer added lines.
   - Only flag issues **introduced or made reachable by this change**. Existing problems elsewhere are out of scope.
