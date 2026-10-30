@@ -48,6 +48,24 @@ def _code_block(text: str) -> str:
     return f"{fence}\n{text}\n{fence}"
 
 
+def _stage_lines(stages: dict, counts: dict) -> list[str]:
+    out = []
+    v = stages.get("verifier")
+    if v and v["status"] == "skipped":
+        out.append("- Verifier: skipped")
+    elif v:
+        tag = " (cached)" if v.get("cached") else ""
+        note = "" if v["status"] == "ok" else f" — {v['status'].upper()}: findings kept unverified"
+        out.append(f"- Verifier: {v['findings_in']} in → {counts.get('after_verifier', 0)} kept, "
+                   f"{v['wall_s']:.1f}s{tag}{note}")
+    t = stages.get("triage")
+    if t:
+        removed = t.get("cap_removed", 0)
+        out.append(f"- Triage: {counts.get('after_verifier', 0)} → {counts.get('after_triage', 0)} kept"
+                   + (f" ({removed} removed by the cap)" if removed else ""))
+    return out
+
+
 def _stats_md(stats: dict) -> str:
     totals = stats.get("totals", {})
     counts = stats.get("counts", {})
@@ -62,6 +80,7 @@ def _stats_md(stats: dict) -> str:
         f"- Estimated cost: ${totals.get('cost_usd', 0.0):.4f}",
         f"- Latency: {totals.get('wall_s', 0.0):.1f}s{cached}",
     ]
+    lines += _stage_lines(stats.get("stages", {}), counts)
     for name, s in stats.get("specialists", {}).items():
         if s["status"] == "failed":
             lines.append(f"- Specialist {name}: FAILED ({s['error']})")

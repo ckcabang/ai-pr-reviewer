@@ -48,18 +48,18 @@ def review_input(tmp_path, make_repo, diff_of):
     )
 
 
-def test_review_of_a_real_git_diff_yields_a_finding_rendered_as_markdown_and_json(review_input, config):
-    provider = FakeProvider({"correctness": {"findings": [FINDING]}})
+def test_review_of_a_real_git_diff_yields_a_finding_rendered_as_markdown_and_json(review_input, config, keep_all):
+    provider = FakeProvider({"correctness": {"findings": [FINDING]}, "verifier": keep_all})
 
     result = review(review_input, provider=provider, config=config)
 
     assert [f.title for f in result.findings] == ["Total is now returned in cents"]
     finding = result.findings[0]
     assert (finding.reviewer, finding.file, finding.line) == ("correctness", "app/pricing.py", 2)
-    assert finding.id and finding.triage == "review_recommended"
+    assert finding.id and finding.triage == "action_required"
 
     md = render_markdown(result)
-    assert md.startswith("# AI Review: 0 action required · 1 recommended")
+    assert md.startswith("# AI Review: 1 action required · 0 recommended")
     assert "app/pricing.py:2" in md
     assert "Total is now returned in cents" in md
     assert "cents = int((order.subtotal + order.tax) * 100)" in md
