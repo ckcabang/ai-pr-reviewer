@@ -1,0 +1,26 @@
+issues:
+  - id: pr02-1
+    file: app/services/orders.py
+    line_hint: 56            # the f-string WHERE clause with the interpolated email
+    area: security
+    severity: high
+    rule_id: R2
+    requires: diff
+    description: >-
+      search_orders_by_email builds its SQL with an f-string that interpolates the caller-supplied
+      email into the LIKE pattern instead of using a bound parameter, so the email query
+      parameter allows SQL injection (and breaks the "all SQL is parameterized" rule).
+
+  - id: pr02-2
+    file: app/routes/orders.py
+    line_hint: 34            # route returns search results without restricting to the current user
+    area: security
+    severity: high
+    requires: diff
+    description: >-
+      GET /orders/search authenticates the caller but never scopes the search to them: it returns
+      every order whose customer email matches, so a logged-in user can read other customers'
+      orders (ids, status, items and totals) just by searching their email.
+    related:
+      - file: app/services/orders.py
+        line_hint: 56

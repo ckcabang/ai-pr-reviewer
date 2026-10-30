@@ -1,0 +1,11 @@
+id: pr14
+title: Paginate the list-orders endpoint
+description: |
+  `GET /orders` returns every order a customer has ever placed, which is getting slow for repeat
+  buyers. This adds paging.
+
+  - New `page` (1-based, default 1) and `page_size` (default 20) query parameters.
+  - New `orders.list_orders_page(user_id, limit, offset)` doing a `LIMIT/OFFSET` query, still
+    scoped to the caller and ordered by id.
+  - `orders.list_orders` is unchanged because the export endpoint still uses it.
+  - Added a test for caller scoping and `page_size`.

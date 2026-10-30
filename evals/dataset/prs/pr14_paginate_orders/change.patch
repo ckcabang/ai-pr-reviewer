@@ -1,0 +1,71 @@
+diff --git a/app/routes/orders.py b/app/routes/orders.py
+index 51d348b..4aa611c 100644
+--- a/app/routes/orders.py
++++ b/app/routes/orders.py
+@@ -1,6 +1,6 @@
+ from __future__ import annotations
+ 
+-from fastapi import APIRouter, Depends, HTTPException
++from fastapi import APIRouter, Depends, HTTPException, Query
+ 
+ from app import auth
+ from app.logging_setup import get_logger
+@@ -25,8 +25,14 @@ def create_order(body: OrderCreate, user: CurrentUser = Depends(auth.get_current
+ 
+ 
+ @router.get("", response_model=list[OrderOut])
+-def list_orders(user: CurrentUser = Depends(auth.get_current_user)):
+-    return [orders.to_out(o) for o in orders.list_orders(user.id)]
++def list_orders(
++    page: int = Query(default=1, ge=1),
++    page_size: int = Query(default=20, ge=1),
++    user: CurrentUser = Depends(auth.get_current_user),
++):
++    """One page of the caller's orders, oldest first. Pages are numbered from 1."""
++    offset = page * page_size
++    return [orders.to_out(o) for o in orders.list_orders_page(user.id, page_size, offset)]
+ 
+ 
+ @router.get("/{order_id}", response_model=OrderOut)
+diff --git a/app/services/orders.py b/app/services/orders.py
+index fd82184..de29a94 100644
+--- a/app/services/orders.py
++++ b/app/services/orders.py
+@@ -48,6 +48,14 @@ def list_orders(user_id: int) -> list[dict]:
+     return [dict(r) for r in rows]
+ 
+ 
++def list_orders_page(user_id: int, limit: int, offset: int) -> list[dict]:
++    rows = db.execute(
++        "SELECT id, user_id, status, discount_code FROM orders WHERE user_id = ? ORDER BY id LIMIT ? OFFSET ?",
++        (user_id, limit, offset),
++    ).all()
++    return [dict(r) for r in rows]
++
++
+ def get_items(order_id: int) -> list[OrderItemOut]:
+     rows = db.execute(
+         "SELECT sku, quantity, unit_price FROM order_items WHERE order_id = ? ORDER BY id", (order_id,)
+diff --git a/tests/test_api.py b/tests/test_api.py
+index 0d008b2..e7f2acf 100644
+--- a/tests/test_api.py
++++ b/tests/test_api.py
+@@ -41,6 +41,18 @@ def test_orders_require_authentication(client):
+     assert client.get("/orders").status_code == 401
+ 
+ 
++def test_list_orders_is_scoped_to_the_caller_and_honours_page_size(client, stocked, create_user, auth_headers):
++    user = create_user()
++    other = create_user("bob@example.com")
++    headers = auth_headers(user)
++    for _ in range(3):
++        _place_order(client, headers, qty=1)
++    assert client.get("/orders", params={"page_size": 2}, headers=auth_headers(other)).json() == []
++    resp = client.get("/orders", params={"page_size": 1}, headers=headers)
++    assert resp.status_code == 200 and len(resp.json()) <= 1
++    assert all(o["user_id"] == user for o in resp.json())
++
++
+ def test_user_cannot_read_another_users_order(client, stocked, create_user, auth_headers):
+     ann, bob = create_user("ann@example.com"), create_user("bob@example.com")
+     order = _place_order(client, auth_headers(ann))

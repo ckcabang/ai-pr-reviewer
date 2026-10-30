@@ -1,0 +1,10 @@
+id: pr12
+title: Add inventory reservation endpoint
+description: |
+  The storefront wants to hold stock while a shopper is still in checkout, before an order exists.
+  This adds `POST /inventory/{sku}/reserve`.
+
+  - Any logged-in user can reserve 1-100 units of a SKU.
+  - Returns the item with its remaining stock; unknown SKUs get a 404 and sold-out items a 409.
+  - New `inventory.reserve_for_cart` service function backs the endpoint.
+  - Tests cover the auth requirement, the happy path and an unknown SKU.
