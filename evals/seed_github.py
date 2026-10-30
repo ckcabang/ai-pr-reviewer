@@ -82,7 +82,7 @@ def _run(*cmd: str, cwd: Path | None = None) -> str:
     return proc.stdout
 
 
-def publish(seed: SeedRepo, repo: str, *, force: bool = False) -> list[str]:
+def publish(seed: SeedRepo, repo: str, *, force: bool = False, push: bool = True) -> list[str]:
     """Create the private repo if missing, push main + PR branches, open any missing PRs."""
     exists = subprocess.run(["gh", "repo", "view", repo], capture_output=True, text=True).returncode == 0
     if not exists:
@@ -90,7 +90,8 @@ def publish(seed: SeedRepo, repo: str, *, force: bool = False) -> list[str]:
     ssh_url = f"git@github.com:{repo}.git"
     remotes = _git(seed.repo, "remote").split()
     _git(seed.repo, *(["remote", "set-url"] if "origin" in remotes else ["remote", "add"]), "origin", ssh_url)
-    _run("git", "push", *(["--force"] if force else []), "origin", "main", *seed.branches, cwd=seed.repo)
+    if push:
+        _run("git", "push", *(["--force"] if force else []), "origin", "main", *seed.branches, cwd=seed.repo)
     urls = []
     for pr_id in seed.branches:
         pr = load_pr(pr_id)
@@ -109,6 +110,9 @@ def main(argv: list[str] | None = None) -> int:
                    help=f"Ref of {ACTION_REPO} the workflow uses (default main; use poc-v1 until main is updated).")
     p.add_argument("--local-only", metavar="DIR", help="Only build the git repo in DIR (must be empty); no network.")
     p.add_argument("--force", action="store_true", help="Force-push main and the PR branches.")
+    p.add_argument("--skip-push", action="store_true",
+                   help="Do not push (the branches must already be on the remote); only create missing PRs.")
+    p.add_argument("--workdir", metavar="DIR", help="Build the local repo in DIR (empty) and keep it, instead of a temp dir.")
     args = p.parse_args(argv)
     try:
         if args.local_only:
@@ -116,8 +120,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"built {seed.repo}: main={seed.main_sha[:10]} " + " ".join(f"{k}={v[:10]}" for k, v in seed.branches.items()))
             return 0
         with tempfile.TemporaryDirectory(prefix="ai-review-demo-") as tmp:
-            seed = build_seed_repo(Path(tmp) / "repo", args.prs, args.action_ref)
-            for url in publish(seed, args.repo, force=args.force):
+            seed = build_seed_repo(args.workdir or Path(tmp) / "repo", args.prs, args.action_ref)
+            for url in publish(seed, args.repo, force=args.force, push=not args.skip_push):
                 print(url)
     except DatasetError as e:
         print(f"error: {e}", file=sys.stderr)
