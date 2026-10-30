@@ -238,7 +238,7 @@ def _defang(text: str) -> str:
 
 def load_rules(review_input: ReviewInput) -> tuple[str, str]:
     """(team rules, don't-flag list) as prompt text. The one rules reader, shared with the
-    context bundle: explicit path, else REVIEW.md at the base revision, else the checkout's (D33)."""
+    context bundle: explicit path, else REVIEW.md at the base revision, else the checkout's (D36)."""
     rules = read_rules(review_input.repo_root, review_input.review_rules_path, review_input.base_ref)
     return rules.render_rules(), rules.render_do_not_flag()
 

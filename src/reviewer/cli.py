@@ -117,7 +117,7 @@ def _review_command(args: argparse.Namespace, inner: Provider | None,
                 diff=_git_diff(checkout, pull.base_sha, pull.head_sha),
                 title=pull.title,
                 description=pull.body,
-                base_ref=pull.base_sha,  # rules come from the base, not from the PR's own checkout (D33)
+                base_ref=pull.base_sha,  # rules come from the base, not from the PR's own checkout (D36)
                 review_rules_path=rules_path,
             )
             result = review(review_input, provider=provider, config=config)
