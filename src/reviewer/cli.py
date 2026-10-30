@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import subprocess
 import sys
 from functools import partial
 from pathlib import Path
@@ -17,6 +16,7 @@ import httpx2
 from reviewer.config import load_config
 from reviewer.context import build_context
 from reviewer.diff import parse_diff
+from reviewer.gitutil import git, git_diff
 from reviewer.github import GitHubClient, parse_pr_url, post_review, pull_head_checkout, token_from_env
 from reviewer.llm import Provider, build_provider
 from reviewer.models import ReviewInput, ReviewResult
@@ -114,7 +114,7 @@ def _review_command(args: argparse.Namespace, inner: Provider | None,
         with pull_head_checkout(repo_root, ref, pull) as checkout:
             review_input = ReviewInput(
                 repo_root=checkout,
-                diff=_git_diff(checkout, pull.base_sha, pull.head_sha),
+                diff=git_diff(checkout, pull.base_sha, pull.head_sha),
                 title=pull.title,
                 description=pull.body,
                 base_ref=pull.base_sha,  # rules come from the base, not from the PR's own checkout (D36)
@@ -132,7 +132,7 @@ def _review_command(args: argparse.Namespace, inner: Provider | None,
                 raise CLIError(f"cannot read description file: {e}") from e
         review_input = ReviewInput(
             repo_root=repo_root,
-            diff=_git_diff(repo_root, args.base),
+            diff=git_diff(repo_root, args.base),
             title=args.title,
             description=description,
             base_ref=args.base,
@@ -152,7 +152,7 @@ def _context_command(args: argparse.Namespace) -> int:
     repo_root = _repo_root(args.repo)
     review_input = ReviewInput(
         repo_root=repo_root,
-        diff=_git_diff(repo_root, args.base),
+        diff=git_diff(repo_root, args.base),
         base_ref=args.base,
         review_rules_path=Path(args.rules) if args.rules else None,
     )
@@ -187,27 +187,10 @@ def _write_file(path: Path, text: str) -> None:
     print(f"wrote {path}", file=sys.stderr)
 
 
-def _git(repo: Path | str, *args: str) -> str:
-    try:
-        out = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
-    except FileNotFoundError as e:
-        raise CLIError("git is not installed or not on PATH") from e
-    if out.returncode != 0:
-        raise CLIError(out.stderr.strip() or f"git {' '.join(args)} failed")
-    return out.stdout
-
-
 def _repo_root(path: str) -> Path:
     if not Path(path).is_dir():
         raise CLIError(f"not a directory: {path}")
-    return Path(_git(path, "rev-parse", "--show-toplevel").strip())
-
-
-def _git_diff(repo_root: Path, base: str, head: str = "HEAD") -> str:
-    # Explicit prefixes/flags so the user's git config (diff.noprefix, quotepath, external
-    # diff tools, rename detection) cannot change what the parser sees.
-    return _git(repo_root, "-c", "core.quotepath=false", "diff", "--no-color", "--no-ext-diff",
-                "--src-prefix=a/", "--dst-prefix=b/", "-M", f"{base}...{head}")
+    return Path(git(path, "rev-parse", "--show-toplevel").strip())
 
 
 if __name__ == "__main__":

@@ -27,8 +27,8 @@ from evals.dataset import DatasetPR, Materialized, load_all, load_pr, materializ
 from evals.judge import FunctionLocator, judge_pr
 from evals.judge_fixtures import check_judge_agreement
 from evals.metrics import summarize
-from reviewer.cli import _git_diff
 from reviewer.config import Config, load_config
+from reviewer.gitutil import git_diff
 from reviewer.llm import Provider, build_provider
 from reviewer.models import ReviewInput
 
@@ -80,8 +80,9 @@ def evaluate(
             materialized.append(m)
             prepared[pr.id] = _Prepared(
                 pr=pr,
-                review_input=ReviewInput(repo_root=m.repo, diff=_git_diff(m.repo, m.base_ref),
-                                         title=pr.title, description=pr.description),
+                review_input=ReviewInput(repo_root=m.repo, diff=git_diff(m.repo, m.base_ref),
+                                         title=pr.title, description=pr.description,
+                                         base_ref=m.base_ref),  # as in the CLI: rules from the base (D36)
                 locator=FunctionLocator(m.repo),
             )
 

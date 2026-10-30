@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 import httpx2
 
 from reviewer.diff import parse_diff
+from reviewer.gitutil import GitError, git
 from reviewer.models import ReviewResult
 from reviewer.render import render_inline_comment, render_review_body
 
@@ -177,16 +178,6 @@ def post_review(client: GitHubClient, result: ReviewResult, diff: str, head_sha:
 
 # --- reviewing the PR head ----------------------------------------------------------------
 
-def _git(repo: Path, *args: str) -> str:
-    try:
-        out = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
-    except FileNotFoundError as e:
-        raise GitHubError("git is not installed or not on PATH") from e
-    if out.returncode != 0:
-        raise GitHubError(out.stderr.strip() or f"git {' '.join(args)} failed")
-    return out.stdout
-
-
 def _has_commit(repo: Path, sha: str) -> bool:
     return subprocess.run(["git", "-C", str(repo), "cat-file", "-e", f"{sha}^{{commit}}"],
                           capture_output=True).returncode == 0
@@ -197,8 +188,8 @@ def _ensure_commits(repo: Path, ref: PullRef, pull: PullRequest) -> None:
     if not _has_commit(repo, pull.head_sha):
         spec = f"pull/{ref.number}/head"
         try:
-            _git(repo, "fetch", "--no-tags", "origin", spec)
-        except GitHubError as e:
+            git(repo, "fetch", "--no-tags", "origin", spec)
+        except GitError as e:
             raise GitHubError(f"PR head {pull.head_sha[:12]} is not in the repository and "
                               f"`git fetch origin {spec}` failed: {e}") from e
         if not _has_commit(repo, pull.head_sha):
@@ -206,8 +197,8 @@ def _ensure_commits(repo: Path, ref: PullRef, pull: PullRequest) -> None:
                               "(did the PR get new commits?)")
     if not _has_commit(repo, pull.base_sha):
         try:
-            _git(repo, "fetch", "--no-tags", "origin", pull.base_sha)
-        except GitHubError as e:
+            git(repo, "fetch", "--no-tags", "origin", pull.base_sha)
+        except GitError as e:
             raise GitHubError(f"PR base {pull.base_sha[:12]} is not in the repository and cannot be "
                               f"fetched (use a full-history checkout): {e}") from e
 
@@ -219,13 +210,13 @@ def pull_head_checkout(repo_root: Path, ref: PullRef, pull: PullRequest) -> Iter
     `repo_root` itself when its HEAD is already the head SHA; otherwise a temporary git
     worktree at the head SHA, removed on exit even if the review raised."""
     _ensure_commits(repo_root, ref, pull)
-    if _git(repo_root, "rev-parse", "HEAD").strip() == pull.head_sha:
+    if git(repo_root, "rev-parse", "HEAD").strip() == pull.head_sha:
         yield repo_root
         return
     tmp = Path(tempfile.mkdtemp(prefix="reviewer-pr-"))
     worktree = tmp / "worktree"
     try:
-        _git(repo_root, "worktree", "add", "--detach", str(worktree), pull.head_sha)
+        git(repo_root, "worktree", "add", "--detach", str(worktree), pull.head_sha)
         yield worktree
     finally:
         subprocess.run(["git", "-C", str(repo_root), "worktree", "remove", "--force", str(worktree)],

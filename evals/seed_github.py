@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from evals.dataset import DatasetError, load_pr, materialize_base
-from evals.dataset.materialize import _git  # fixed author/date, so commits are deterministic
+from evals.dataset.materialize import git  # fixed author/date, so commits are deterministic
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_WORKFLOW = REPO_ROOT / "examples" / "ai-review.yml"
@@ -55,23 +55,23 @@ def build_seed_repo(dest: Path | str, pr_ids=DEFAULT_PRS, action_ref: str = "mai
     workflow = dest / WORKFLOW_PATH
     workflow.parent.mkdir(parents=True)
     workflow.write_text(workflow_text(action_ref))
-    _git(dest, "add", WORKFLOW_PATH)
-    _git(dest, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "Add the AI review workflow")
-    main_sha = _git(dest, "rev-parse", "HEAD").strip()
+    git(dest, "add", WORKFLOW_PATH)
+    git(dest, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "Add the AI review workflow")
+    main_sha = git(dest, "rev-parse", "HEAD").strip()
     branches = {}
     for pr_id in pr_ids:
         pr = load_pr(pr_id)
-        _git(dest, "checkout", "-q", "-b", pr.id, "main")
+        git(dest, "checkout", "-q", "-b", pr.id, "main")
         proc = subprocess.run(
             ["git", "-C", str(dest), "apply", "--whitespace=nowarn", "-"],
             input=pr.patch, capture_output=True, text=True,
         )
         if proc.returncode:
             raise DatasetError(f"{pr.id}: change.patch does not apply: {proc.stderr.strip()}")
-        _git(dest, "add", "-A")
-        _git(dest, "-c", "commit.gpgsign=false", "commit", "-q", "-m", f"{pr.title}\n\n{pr.description}\n")
-        branches[pr.id] = _git(dest, "rev-parse", "HEAD").strip()
-        _git(dest, "checkout", "-q", "main")
+        git(dest, "add", "-A")
+        git(dest, "-c", "commit.gpgsign=false", "commit", "-q", "-m", f"{pr.title}\n\n{pr.description}\n")
+        branches[pr.id] = git(dest, "rev-parse", "HEAD").strip()
+        git(dest, "checkout", "-q", "main")
     return SeedRepo(dest, main_sha, branches)
 
 
@@ -88,8 +88,8 @@ def publish(seed: SeedRepo, repo: str, *, force: bool = False, push: bool = True
     if not exists:
         _run("gh", "repo", "create", repo, "--private", "--description", "Live demo for ai-pr-reviewer")
     ssh_url = f"git@github.com:{repo}.git"
-    remotes = _git(seed.repo, "remote").split()
-    _git(seed.repo, *(["remote", "set-url"] if "origin" in remotes else ["remote", "add"]), "origin", ssh_url)
+    remotes = git(seed.repo, "remote").split()
+    git(seed.repo, *(["remote", "set-url"] if "origin" in remotes else ["remote", "add"]), "origin", ssh_url)
     if push:
         _run("git", "push", *(["--force"] if force else []), "origin", "main", *seed.branches, cwd=seed.repo)
     urls = []

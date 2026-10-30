@@ -254,6 +254,19 @@ def test_the_pipeline_plugs_in_as_an_arm_and_only_triaged_findings_are_scored(co
     assert results["summary"]["pipeline"]["precision"]["mean"] == 1.0
 
 
+def test_every_arm_gets_the_base_ref_so_rules_come_from_the_base_like_in_the_cli(config, out_dir):
+    seen = []
+
+    def spy(review_input, *, provider, config):
+        seen.append(review_input.base_ref)
+        return ReviewResult(findings=[], stats={})
+
+    run(FakeProvider({"judge": {"matches": []}}), config, out_dir, arms=["spy"], runs=1, pr_ids=["pr06"],
+        arm_registry={"spy": Arm("spy", spy)})
+
+    assert seen == ["main"]
+
+
 def test_unknown_arms_are_rejected_before_any_work(config, out_dir):
     provider = FakeProvider({})
     with pytest.raises(UnknownArm, match="nope.*baseline"):

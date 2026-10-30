@@ -36,7 +36,7 @@ class Materialized:
     pr: DatasetPR
 
 
-def _git(repo: Path, *args: str, stdin: str | None = None) -> str:
+def git(repo: Path, *args: str, stdin: str | None = None) -> str:
     proc = subprocess.run(
         ["git", "-C", str(repo), *args], input=stdin, capture_output=True, text=True,
         env={**os.environ, **_IDENT},
@@ -63,10 +63,10 @@ def materialize_base(dest: Path | str | None = None) -> str:
     """
     dest = _prepare_dest(dest, "demo-base")
     shutil.copytree(DEMO_SERVICE, dest, ignore=_IGNORE, dirs_exist_ok=True)
-    _git(dest, "init", "-q", "-b", BASE_BRANCH)
-    _git(dest, "add", "-A")
-    _git(dest, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "Demo service base state")
-    return _git(dest, "rev-parse", "HEAD").strip()
+    git(dest, "init", "-q", "-b", BASE_BRANCH)
+    git(dest, "add", "-A")
+    git(dest, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "Demo service base state")
+    return git(dest, "rev-parse", "HEAD").strip()
 
 
 def materialize(pr: DatasetPR | str, dest: Path | str | None = None) -> Materialized:
@@ -85,9 +85,9 @@ def materialize(pr: DatasetPR | str, dest: Path | str | None = None) -> Material
     )
     if check.returncode:
         raise DatasetError(f"{pr.id}: change.patch does not apply to the demo service: {check.stderr.strip()}")
-    _git(repo, "checkout", "-q", "-b", pr.id)
-    _git(repo, "add", "-A")
+    git(repo, "checkout", "-q", "-b", pr.id)
+    git(repo, "add", "-A")
     message = f"{pr.title}\n\n{pr.description}\n"
-    _git(repo, "-c", "commit.gpgsign=false", "commit", "-q", "-m", message)
-    head_sha = _git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "-c", "commit.gpgsign=false", "commit", "-q", "-m", message)
+    head_sha = git(repo, "rev-parse", "HEAD").strip()
     return Materialized(repo, base_sha, head_sha, BASE_BRANCH, pr.id, pr)

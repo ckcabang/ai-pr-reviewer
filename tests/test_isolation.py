@@ -80,9 +80,9 @@ def test_the_guard_itself_catches_an_open_of_a_labels_file(monkeypatch):
 def test_reviewing_a_dataset_pr_never_opens_the_labels_nor_shows_them_to_a_model(pr_id, config, tmp_path, monkeypatch):
     pr = load_pr(pr_id)
     m = materialize(pr, tmp_path / "repo")
-    from reviewer.cli import _git_diff
+    from reviewer.gitutil import git_diff
 
-    review_input = ReviewInput(repo_root=m.repo, diff=_git_diff(m.repo, m.base_ref), title=pr.title,
+    review_input = ReviewInput(repo_root=m.repo, diff=git_diff(m.repo, m.base_ref), title=pr.title,
                                description=pr.description)
     empty = {"findings": []}
     provider = FakeProvider({"correctness": empty, "security": empty, "standards": empty, "baseline": empty})
