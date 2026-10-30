@@ -9,11 +9,15 @@ import argparse
 import logging
 import subprocess
 import sys
+from functools import partial
 from pathlib import Path
+
+import httpx2
 
 from reviewer.config import load_config
 from reviewer.context import build_context
 from reviewer.diff import parse_diff
+from reviewer.github import GitHubClient, parse_pr_url, post_review, pull_head_checkout, token_from_env
 from reviewer.llm import Provider, build_provider
 from reviewer.models import ReviewInput, ReviewResult
 from reviewer.pipeline import review
@@ -28,9 +32,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="reviewer", description="AI pull request reviewer.")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("review", help="Review the changes in a repository against a base ref.")
+    p = sub.add_parser("review", help="Review a change: a diff against a base ref, or a GitHub pull request.")
     p.add_argument("--repo", required=True, metavar="PATH", help="Git repository to review (any directory).")
-    p.add_argument("--base", required=True, metavar="REF", help="Base ref; reviews the diff BASE...HEAD.")
+    mode = p.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--base", metavar="REF", help="Base ref; reviews the diff BASE...HEAD.")
+    mode.add_argument("--pr", metavar="URL",
+                      help="GitHub pull request URL (https://github.com/OWNER/REPO/pull/N). Title, body and "
+                           "commits come from GitHub; needs GITHUB_TOKEN in the environment.")
+    p.add_argument("--post", action="store_true",
+                   help="With --pr: post the result as one PR review (COMMENT event, inline comments on "
+                        "changed lines, the rest in the summary).")
     p.add_argument("--title", default="", help="PR title (intent, treated as untrusted data).")
     p.add_argument("--description-file", metavar="FILE", help="File with the PR description.")
     p.add_argument("--rules", metavar="FILE", help="Team rules file (default: REVIEW.md at the repo root).")
@@ -52,13 +63,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None, *, provider: Provider | None = None) -> int:
+def main(argv: list[str] | None = None, *, provider: Provider | None = None,
+         transport: httpx2.BaseTransport | None = None) -> int:
     """Run the CLI and return the exit code. `provider` replaces the real model provider
-    (tests inject a fake); the disk cache still applies on top of it."""
+    and `transport` the HTTP transport used for GitHub (tests inject fakes); the disk cache
+    still applies on top of the provider."""
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.command == "review" and args.format == "both" and not args.out:
-        parser.error("--format both requires --out")
+    if args.command == "review":
+        if args.format == "both" and not args.out:
+            parser.error("--format both requires --out")
+        if args.post and args.pr is None:
+            parser.error("--post requires --pr")
+        if args.pr is not None and (args.title or args.description_file):
+            parser.error("--title and --description-file cannot be combined with --pr "
+                         "(the title and body come from GitHub)")
 
     verbose = getattr(args, "verbose", False)
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr, format="%(message)s", force=True)
@@ -66,7 +85,7 @@ def main(argv: list[str] | None = None, *, provider: Provider | None = None) -> 
     try:
         if args.command == "context":
             return _context_command(args)
-        return _review_command(args, provider)
+        return _review_command(args, provider, transport)
     except Exception as e:  # every failure is exit code 2 with a message, never a traceback
         if verbose:
             logging.getLogger("reviewer").exception("review failed")
@@ -80,28 +99,50 @@ def exit_code_for(result: ReviewResult, fail_on: str) -> int:
     return 0
 
 
-def _review_command(args: argparse.Namespace, inner: Provider | None) -> int:
+def _review_command(args: argparse.Namespace, inner: Provider | None,
+                    transport: httpx2.BaseTransport | None) -> int:
     config = load_config(args.config)
     repo_root = _repo_root(args.repo)
-    description = ""
-    if args.description_file:
-        try:
-            description = Path(args.description_file).read_text()
-        except OSError as e:
-            raise CLIError(f"cannot read description file: {e}") from e
-
-    review_input = ReviewInput(
-        repo_root=repo_root,
-        diff=_git_diff(repo_root, args.base),
-        title=args.title,
-        description=description,
-        base_ref=args.base,
-        review_rules_path=Path(args.rules) if args.rules else None,
-    )
+    rules_path = Path(args.rules) if args.rules else None
     provider = build_provider(config, use_cache=not args.no_cache, inner=inner)
-    result = review(review_input, provider=provider, config=config)
+
+    post = None  # set in PR mode with --post: posts the result, returns the review URL
+    if args.pr is not None:
+        ref = parse_pr_url(args.pr)
+        client = GitHubClient(ref, token_from_env(), transport=transport)
+        pull = client.get_pull()
+        with pull_head_checkout(repo_root, ref, pull) as checkout:
+            review_input = ReviewInput(
+                repo_root=checkout,
+                diff=_git_diff(checkout, pull.base_sha, pull.head_sha),
+                title=pull.title,
+                description=pull.body,
+                base_ref=pull.base_sha,  # rules come from the base, not from the PR's own checkout (D33)
+                review_rules_path=rules_path,
+            )
+            result = review(review_input, provider=provider, config=config)
+        if args.post:
+            post = partial(post_review, client, result, review_input.diff, pull.head_sha)
+    else:
+        description = ""
+        if args.description_file:
+            try:
+                description = Path(args.description_file).read_text()
+            except OSError as e:
+                raise CLIError(f"cannot read description file: {e}") from e
+        review_input = ReviewInput(
+            repo_root=repo_root,
+            diff=_git_diff(repo_root, args.base),
+            title=args.title,
+            description=description,
+            base_ref=args.base,
+            review_rules_path=rules_path,
+        )
+        result = review(review_input, provider=provider, config=config)
 
     _write_output(result, args.format, args.out)
+    if post:  # after the output, so a failed post still leaves the review on stdout / in the files
+        print(f"posted review: {post()}", file=sys.stderr)
     return exit_code_for(result, args.fail_on)
 
 
@@ -162,11 +203,11 @@ def _repo_root(path: str) -> Path:
     return Path(_git(path, "rev-parse", "--show-toplevel").strip())
 
 
-def _git_diff(repo_root: Path, base: str) -> str:
+def _git_diff(repo_root: Path, base: str, head: str = "HEAD") -> str:
     # Explicit prefixes/flags so the user's git config (diff.noprefix, quotepath, external
     # diff tools, rename detection) cannot change what the parser sees.
     return _git(repo_root, "-c", "core.quotepath=false", "diff", "--no-color", "--no-ext-diff",
-                "--src-prefix=a/", "--dst-prefix=b/", "-M", f"{base}...HEAD")
+                "--src-prefix=a/", "--dst-prefix=b/", "-M", f"{base}...{head}")
 
 
 if __name__ == "__main__":

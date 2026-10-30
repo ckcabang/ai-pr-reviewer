@@ -1,0 +1,16 @@
+issues:
+  - id: pr07-1
+    file: app/routes/users.py
+    line_hint: 34            # `logger.warning(..., row["id"], body.model_dump())` on the wrong-password branch
+    area: security
+    severity: high
+    rule_id: R7
+    requires: diff
+    description: >-
+      The failed-login warnings log body.model_dump(), which includes the plaintext password the user
+      typed (a wrong-password attempt is often the real password with a typo, and for unknown accounts
+      it may be the password for a different site). Passwords must never be logged (R7); only the email
+      or user id should be logged, or the payload must go through the redaction helper.
+    related:
+      - file: app/routes/users.py
+        line_hint: 31

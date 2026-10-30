@@ -1,0 +1,270 @@
+diff --git a/README.md b/README.md
+new file mode 100644
+index 0000000..48cd76b
+--- /dev/null
++++ b/README.md
+@@ -0,0 +1,73 @@
++# Orders & Payments service
++
++A small FastAPI service for placing orders, taking payments and issuing refunds. Data lives in a
++single SQLite file; payments and email go through thin HTTP client wrappers.
++
++## Layout
++
++| Path | What lives there |
++| --- | --- |
++| `app/main.py` | App factory; includes every router and initialises the database on start-up. |
++| `app/routes/` | HTTP handlers: orders, payments, refunds, users, inventory, exports, webhooks. |
++| `app/services/` | Business logic: pricing, order lifecycle (`order_state`), inventory, invoices. |
++| `app/clients/` | Wrappers for the payment gateway and the email API. |
++| `app/auth.py`, `app/idempotency.py`, `app/db.py` | Sessions, idempotency keys, SQLite access. |
++| `tests/` | Offline tests; the gateway and email clients are swapped for `httpx.MockTransport`. |
++| `REVIEW.md` | The team's review rules (R1-R9) for this service. |
++
++## Running it
++
++```
++uvicorn app.main:app
++```
++
++Tables are created on start-up if they are missing. Any ASGI server works; `app.main:app` is the
++entry point.
++
++## Configuration
++
++All configuration comes from environment variables (see `app/settings.py`):
++
++| Variable | Default | Purpose |
++| --- | --- | --- |
++| `DATABASE_PATH` | `orders.db` | SQLite file. |
++| `EXPORT_DIR` | `exports` | Where `GET /exports/orders` writes its files. |
++| `TAX_RATE` | `0.0825` | Tax rate applied to the discounted subtotal. |
++| `HTTP_TIMEOUT_SECONDS` | `5` | Timeout for gateway and email calls. |
++| `SESSION_TTL_SECONDS` | `86400` | How long a login session lasts. |
++| `PAYMENT_GATEWAY_URL`, `PAYMENT_GATEWAY_API_KEY` | example URL, empty | Payment gateway. |
++| `EMAIL_API_URL`, `EMAIL_API_KEY` | example URL, empty | Transactional email. |
++| `WEBHOOK_SECRET` | empty | Shared secret for signing webhook bodies. |
++
++## Money
++
++Amounts are `Decimal` dollars everywhere in the service and are rounded half up to whole cents by
++`models.to_money`. Floats are rejected. Amounts are stored as text in SQLite and sent to the
++gateway as strings.
++
++## Order lifecycle
++
++Order status changes only through `order_state.transition()`, which enforces these moves:
++
++```
++pending   -> paid, cancelled
++paid      -> shipped, refunded, cancelled
++shipped   -> delivered, refunded
++delivered -> refunded
++```
++
++`cancelled` and `refunded` are final.
++
++## Money-moving endpoints
++
++`POST /payments/capture` and `POST /refunds` require an `Idempotency-Key` header. Repeating a
++request with the same key and body returns the saved response; reusing the key for a different
++request, or while the first request is still running, returns 409.
++
++## Tests
++
++```
++python -m pytest
++```
++
++Run from this directory. Each test gets a fresh SQLite file in a temporary directory.
+diff --git a/app/auth.py b/app/auth.py
+index 0262d77..e607616 100644
+--- a/app/auth.py
++++ b/app/auth.py
+@@ -17,22 +17,26 @@ _ITERATIONS = 200_000
+ 
+ 
+ def hash_password(password: str) -> str:
++    """PBKDF2-SHA256 hash with a random salt, stored as `salt$hexdigest`."""
+     salt = secrets.token_hex(16)
+     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), _ITERATIONS)
+     return f"{salt}${digest.hex()}"
+ 
+ 
+ def verify_password(password: str, stored: str) -> bool:
++    """Check a password against a `salt$hexdigest` value from `hash_password`, in constant time."""
+     salt, _, expected = stored.partition("$")
+     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), _ITERATIONS)
+     return hmac.compare_digest(digest.hex(), expected)
+ 
+ 
+ def _hash_token(token: str) -> str:
++    """Sessions store only the SHA-256 of the bearer token, never the token itself."""
+     return hashlib.sha256(token.encode()).hexdigest()
+ 
+ 
+ def create_session(user_id: int) -> str:
++    """Start a session for the user and return the bearer token (valid for `session_ttl_seconds`)."""
+     token = secrets.token_urlsafe(32)
+     expires_at = int(time.time()) + get_settings().session_ttl_seconds
+     db.execute(
+diff --git a/app/db.py b/app/db.py
+index 2456443..92b25d4 100644
+--- a/app/db.py
++++ b/app/db.py
+@@ -86,6 +86,7 @@ class Result:
+ 
+ 
+ def get_conn() -> sqlite3.Connection:
++    """Open a new connection to `database_path` with foreign keys enforced and dict-like rows."""
+     # isolation_level=None: autocommit, so transactions are explicit via `transaction()`.
+     conn = sqlite3.connect(get_settings().database_path, isolation_level=None)
+     conn.row_factory = sqlite3.Row
+@@ -94,6 +95,7 @@ def get_conn() -> sqlite3.Connection:
+ 
+ 
+ def init_db() -> None:
++    """Create any missing tables. Safe to call on every start-up."""
+     conn = get_conn()
+     try:
+         conn.executescript(SCHEMA)
+diff --git a/app/idempotency.py b/app/idempotency.py
+index 67eec6e..ec02340 100644
+--- a/app/idempotency.py
++++ b/app/idempotency.py
+@@ -13,6 +13,7 @@ class IdempotencyConflict(Exception):
+ 
+ 
+ def hash_request(payload: dict[str, Any]) -> str:
++    """Stable fingerprint of a request, used to tell a replay from a different request on the same key."""
+     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+ 
+ 
+@@ -39,6 +40,7 @@ def check_and_store(key: str, request_hash: str) -> Optional[dict[str, Any]]:
+ 
+ 
+ def save_response(key: str, response: dict[str, Any]) -> None:
++    """Store the finished response so later requests with the same key get it back."""
+     db.execute("UPDATE idempotency_keys SET response = ? WHERE key = ?", (json.dumps(response), key))
+ 
+ 
+diff --git a/app/routes/inventory.py b/app/routes/inventory.py
+index 21ca4a9..e6ce938 100644
+--- a/app/routes/inventory.py
++++ b/app/routes/inventory.py
+@@ -11,6 +11,7 @@ router = APIRouter(prefix="/inventory", tags=["inventory"])
+ 
+ @router.get("/{sku}", response_model=InventoryOut)
+ def get_stock(sku: str, user: CurrentUser = Depends(auth.get_current_user)):
++    """Current stock for a SKU. Any logged-in user may look."""
+     item = inventory.get_item(sku)
+     if item is None:
+         raise HTTPException(status_code=404, detail="Unknown item")
+@@ -19,6 +20,7 @@ def get_stock(sku: str, user: CurrentUser = Depends(auth.get_current_user)):
+ 
+ @router.post("/{sku}/restock", response_model=InventoryOut)
+ def restock(sku: str, body: RestockRequest, admin: CurrentUser = Depends(auth.require_admin)):
++    """Add units to a SKU's stock. Admin only."""
+     try:
+         return inventory.restock(sku, body.quantity)
+     except inventory.UnknownSku:
+diff --git a/app/routes/orders.py b/app/routes/orders.py
+index 51d348b..a5ff04e 100644
+--- a/app/routes/orders.py
++++ b/app/routes/orders.py
+@@ -13,6 +13,7 @@ router = APIRouter(prefix="/orders", tags=["orders"])
+ 
+ @router.post("", response_model=OrderOut, status_code=201)
+ def create_order(body: OrderCreate, user: CurrentUser = Depends(auth.get_current_user)):
++    """Place a pending order for the caller; reserves stock for every line or fails with 404/409/400."""
+     try:
+         order_id = orders.create_order(user.id, body)
+     except inventory.UnknownSku:
+@@ -26,6 +27,7 @@ def create_order(body: OrderCreate, user: CurrentUser = Depends(auth.get_current
+ 
+ @router.get("", response_model=list[OrderOut])
+ def list_orders(user: CurrentUser = Depends(auth.get_current_user)):
++    """The caller's own orders."""
+     return [orders.to_out(o) for o in orders.list_orders(user.id)]
+ 
+ 
+@@ -40,6 +42,7 @@ def get_order(order_id: int, user: CurrentUser = Depends(auth.get_current_user))
+ 
+ @router.post("/{order_id}/cancel", response_model=OrderOut)
+ def cancel_order(order_id: int, user: CurrentUser = Depends(auth.get_current_user)):
++    """Cancel one of the caller's orders if its current state allows it (409 otherwise)."""
+     order = orders.get_order(order_id)
+     if order is None:
+         raise HTTPException(status_code=404, detail="Order not found")
+@@ -53,6 +56,7 @@ def cancel_order(order_id: int, user: CurrentUser = Depends(auth.get_current_use
+ 
+ @router.get("/{order_id}/invoice", response_model=Invoice)
+ def get_invoice(order_id: int, user: CurrentUser = Depends(auth.get_current_user)):
++    """Invoice for one of the caller's orders."""
+     order = orders.get_order(order_id)
+     if order is None:
+         raise HTTPException(status_code=404, detail="Order not found")
+diff --git a/app/services/orders.py b/app/services/orders.py
+index fd82184..c325879 100644
+--- a/app/services/orders.py
++++ b/app/services/orders.py
+@@ -34,6 +34,7 @@ def create_order(user_id: int, payload: OrderCreate) -> int:
+ 
+ 
+ def get_order(order_id: int) -> Optional[dict]:
++    """The order row as a dict (id, user_id, status, discount_code), or None if it does not exist."""
+     row = db.execute(
+         "SELECT id, user_id, status, discount_code FROM orders WHERE id = ?", (order_id,)
+     ).one()
+@@ -41,6 +42,7 @@ def get_order(order_id: int) -> Optional[dict]:
+ 
+ 
+ def list_orders(user_id: int) -> list[dict]:
++    """Every order belonging to `user_id`, oldest first."""
+     rows = db.execute(
+         "SELECT id, user_id, status, discount_code FROM orders WHERE user_id = ? ORDER BY id",
+         (user_id,),
+@@ -49,6 +51,7 @@ def list_orders(user_id: int) -> list[dict]:
+ 
+ 
+ def get_items(order_id: int) -> list[OrderItemOut]:
++    """The order's line items with the unit price captured when the order was placed."""
+     rows = db.execute(
+         "SELECT sku, quantity, unit_price FROM order_items WHERE order_id = ? ORDER BY id", (order_id,)
+     ).all()
+@@ -56,6 +59,7 @@ def get_items(order_id: int) -> list[OrderItemOut]:
+ 
+ 
+ def to_out(order: dict) -> OrderOut:
++    """Build the API representation of an order, including its computed total."""
+     return OrderOut(
+         id=order["id"],
+         user_id=order["user_id"],
+diff --git a/app/services/pricing.py b/app/services/pricing.py
+index 886f263..900ba47 100644
+--- a/app/services/pricing.py
++++ b/app/services/pricing.py
+@@ -15,6 +15,7 @@ class UnknownDiscountCode(ValueError):
+ 
+ 
+ def get_subtotal(order_id: int) -> Decimal:
++    """Sum of quantity x unit price over the order's items, before discount and tax."""
+     rows = db.execute(
+         "SELECT quantity, unit_price FROM order_items WHERE order_id = ?", (order_id,)
+     ).all()
+@@ -22,6 +23,7 @@ def get_subtotal(order_id: int) -> Decimal:
+ 
+ 
+ def get_discount_percent(code: str) -> Decimal:
++    """Percentage a discount code takes off; raises UnknownDiscountCode if the code does not exist."""
+     row = db.execute("SELECT percent_off FROM discount_codes WHERE code = ?", (code,)).one()
+     if row is None:
+         raise UnknownDiscountCode(code)
+@@ -35,6 +37,7 @@ def apply_discount(amount: Decimal, percent: Decimal) -> Decimal:
+ 
+ 
+ def calculate_tax(amount: Decimal, rate: Decimal | None = None) -> Decimal:
++    """Tax on `amount`, rounded half up to cents. Uses the configured `TAX_RATE` unless `rate` is given."""
+     rate = get_settings().tax_rate if rate is None else rate
+     return to_money(amount * rate)
+ 

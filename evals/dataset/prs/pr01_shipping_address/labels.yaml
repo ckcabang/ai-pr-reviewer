@@ -1,0 +1,12 @@
+issues:
+  - id: pr01-1
+    file: app/routes/users.py
+    line_hint: 60            # `def update_shipping_address(user_id, body)`: no auth dependency, no require_owner
+    area: security
+    severity: high
+    rule_id: R1
+    requires: diff
+    description: >-
+      The new PUT /users/{user_id}/address endpoint has no auth.get_current_user dependency and
+      no auth.require_owner check (unlike get_user and update_user in the same file), so any
+      anonymous caller can overwrite any user's shipping address.

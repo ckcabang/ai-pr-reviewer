@@ -10,7 +10,7 @@ import yaml
 from reviewer.cli import exit_code_for, main
 from reviewer.config import default_config_path
 from reviewer.fake import FakeProvider
-from reviewer.models import ReviewResult, VerifiedFinding
+from reviewer.models import ReviewResult, VerifiedFinding, finding_id
 
 FINDING = {
     "file": "a.py", "line": 2, "category": "logic", "severity": "high", "confidence": 0.9,
@@ -38,14 +38,16 @@ def run(args, repo, config_path, provider):
                 provider=provider)
 
 
-def fake():
-    return FakeProvider({"correctness": {"findings": [FINDING]}})
+def fake(verdict="keep", severity="high"):
+    fid = finding_id("correctness", FINDING["file"], FINDING["line"], FINDING["title"])
+    verifier = {"verdicts": [{"id": fid, "verdict": verdict, "confidence": 0.9, "severity": severity}]}
+    return FakeProvider({"correctness": {"findings": [FINDING]}, "verifier": verifier})
 
 
 def test_markdown_goes_to_stdout_by_default_and_exit_code_is_0(repo, config_path, capsys):
     assert run([], repo, config_path, fake()) == 0
     out = capsys.readouterr().out
-    assert out.startswith("# AI Review: 0 action required · 1 recommended")
+    assert out.startswith("# AI Review: 1 action required · 0 recommended")
     assert "a.py:2" in out
 
 
@@ -102,13 +104,13 @@ def test_cache_is_on_by_default_and_off_with_no_cache(repo, config_path):
     provider = fake()
     run([], repo, config_path, provider)
     run([], repo, config_path, provider)
-    assert len(provider.calls) == 1  # second run replayed from the cache
+    assert len(provider.calls) == 2  # specialist + verifier; the second run replayed from the cache
 
     run(["--no-cache"], repo, config_path, provider)
-    assert len(provider.calls) == 2
+    assert len(provider.calls) == 4
 
     run(["--no-cache"], repo, config_path, provider)
-    assert len(provider.calls) == 3  # --no-cache does not write the cache either
+    assert len(provider.calls) == 6  # --no-cache does not write the cache either
 
 
 def test_cached_run_is_labelled_in_the_output(repo, config_path, capsys):
@@ -154,9 +156,12 @@ def test_fail_on_action_required_exits_1_only_when_such_findings_exist():
     assert exit_code_for(result("review_recommended"), "action_required") == 0
 
 
-def test_fail_on_flag_is_accepted(repo, config_path):
-    assert run(["--fail-on", "action_required"], repo, config_path, fake()) == 0
+def test_fail_on_action_required_exits_1_only_when_an_action_required_finding_exists(repo, config_path):
+    assert run(["--fail-on", "action_required"], repo, config_path, fake()) == 1
     assert run(["--fail-on", "never"], repo, config_path, fake()) == 0
+    # the verifier downgrades it to medium severity: recommended, not required
+    assert run(["--fail-on", "action_required", "--no-cache"], repo, config_path, fake(severity="medium")) == 0
+    assert run(["--fail-on", "action_required", "--no-cache"], repo, config_path, fake(verdict="drop")) == 0
 
 
 def test_real_process_without_api_key_exits_2_with_a_clear_message(repo, config_path):

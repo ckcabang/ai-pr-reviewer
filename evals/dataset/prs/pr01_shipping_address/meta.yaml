@@ -1,0 +1,10 @@
+id: pr01
+title: Add endpoint to update shipping address
+description: |
+  Adds `PUT /users/{user_id}/address` so a user's shipping address can be set or changed
+  after registration. The address column and `UserOut.shipping_address` already existed but
+  nothing wrote to them.
+
+  - New `AddressUpdate` request model (5-200 characters; surrounding whitespace is trimmed).
+  - The endpoint returns the updated user, or 404 if the user does not exist.
+  - Tests for the happy path, an unknown user, and a too-short address.

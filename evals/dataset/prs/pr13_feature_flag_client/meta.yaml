@@ -1,0 +1,11 @@
+id: pr13
+title: Add feature-flag client for new checkout
+description: |
+  We want to roll the new checkout out gradually, so this adds a small client for the feature-flag
+  service. Nothing calls it yet; the checkout change will follow in a separate PR.
+
+  - `feature_flags.is_enabled(flag, user_id)` asks the flag service whether a flag is on for a user.
+  - Uses the same timeout setting as the other HTTP clients; the base URL comes from
+    `FEATURE_FLAGS_URL`.
+  - If the flag service is unreachable or returns an error, the flag is treated as off.
+  - Tests use an `httpx.MockTransport` for the happy path and the outage fallback.

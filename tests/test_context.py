@@ -9,6 +9,7 @@ from reviewer.cli import main
 from reviewer.fake import FakeProvider
 from reviewer.models import ReviewInput
 from reviewer.pipeline import review
+from reviewer.render import render_markdown
 
 
 def src(text: str) -> str:
@@ -170,6 +171,17 @@ def test_rules_come_from_the_base_revision_so_a_change_cannot_edit_the_rules_it_
     assert "Anything goes" not in section(prompt, "team_rules")
     assert "- Naming, formatting, import order" in section(prompt, "do_not_flag")
     assert "Everything" not in section(prompt, "do_not_flag")
+
+
+def test_verifier_reads_the_same_base_revision_rules(build, config, keep_all):
+    review_input = build(head={**HEAD, "REVIEW.md": WEAKENED_RULES}, base_ref="main")
+    provider = FakeProvider({"correctness": {"findings": [FINDING]}, "verifier": keep_all})
+
+    review(review_input, provider=provider, config=config)
+
+    [call] = provider.calls_for("verifier")
+    assert "R1: Authenticated ownership" in call.user and "Anything goes" not in call.user
+    assert "- Naming, formatting, import order" in call.user
 
 
 def test_rules_fall_back_to_the_working_tree_when_the_base_has_none_or_no_base_is_given(build, config):
@@ -461,6 +473,16 @@ def test_stats_describe_the_bundle(build, config):
     assert (stats["rules"], stats["do_not_flag"]) == (2, 2)
     assert stats["blocks"] == 4 and stats["omitted_blocks"] == 0 and stats["truncated_blocks"] == 0
     assert 0 < stats["chars"] <= stats["budget"]
+
+
+def test_markdown_footer_reports_the_context(build, config):
+    provider = FakeProvider({"correctness": {"findings": []}})
+    md = render_markdown(review(build(), provider=provider, config=config))
+    assert "- Context: 1 changed, 2 callers, 1 callees, 2 rules (" in md
+
+    config.context.enabled = False
+    md = render_markdown(review(build(), provider=provider, config=config))
+    assert "- Context: off (diff only)" in md
 
 
 # -- the `context` debug command ----------------------------------------------------------------

@@ -106,7 +106,7 @@ def load_rules(repo_root: Path, explicit: Path | None, base_ref: str | None = No
 
     1. `explicit` (an error if unreadable);
     2. `REVIEW.md` at `base_ref` (`git show`), so the change under review cannot edit the rules
-       it is judged by (D31);
+       it is judged by (D33);
     3. `<repo_root>/REVIEW.md`, when the base has none (or there is no base);
     4. nothing.
     """

@@ -19,14 +19,14 @@ def review_input(tmp_path, make_repo, diff_of):
     return ReviewInput(repo_root=repo, diff=diff_of(repo), title="t")
 
 
-def test_repeat_review_is_served_from_cache_and_flagged_cached(tmp_path, config, review_input):
-    fake = FakeProvider({"correctness": {"findings": [FINDING]}})
+def test_repeat_review_is_served_from_cache_and_flagged_cached(tmp_path, config, review_input, keep_all):
+    fake = FakeProvider({"correctness": {"findings": [FINDING]}, "verifier": keep_all})
     provider = CachedProvider(fake, tmp_path / "cache")
 
     first = review(review_input, provider=provider, config=config)
     second = review(review_input, provider=provider, config=config)
 
-    assert len(fake.calls) == 1  # the second review never reached the model
+    assert len(fake.calls) == 2  # specialist + verifier; the second review never reached the model
     assert [f.id for f in second.findings] == [f.id for f in first.findings]
     assert first.stats["specialists"]["correctness"]["cached"] is False
     assert second.stats["specialists"]["correctness"]["cached"] is True

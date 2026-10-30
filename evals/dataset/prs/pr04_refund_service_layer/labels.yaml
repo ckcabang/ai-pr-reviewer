@@ -1,0 +1,29 @@
+issues:
+  - id: pr04-1
+    file: app/routes/refunds.py
+    line_hint: 15            # new route signature: the Idempotency-Key header and check_and_store call are gone
+    area: standards
+    severity: high
+    rule_id: R5
+    requires: rules
+    description: >-
+      The refactored refund endpoint no longer requires an Idempotency-Key header and no longer calls
+      idempotency.check_and_store. A client retry (or a double submit) now issues a second refund
+      at the gateway. Team rule R5 requires capture and refund endpoints to be idempotent via the key.
+
+  - id: pr04-2
+    file: app/services/refunds.py
+    line_hint: 33            # `UPDATE orders SET status = 'refunded'` instead of order_state.transition
+    area: correctness
+    severity: high
+    rule_id: R9
+    requires: cross_file
+    description: >-
+      The service sets the order status with a direct UPDATE and drops both the previous
+      order_state.is_allowed guard and order_state.transition. The state machine
+      (services/order_state.py) only allows refunds from paid, shipped or delivered, so now an order in
+      any state that has a payment row (pending, cancelled, already refunded) can be refunded,
+      including repeat refunds of the same order. Order status changes must go through transition().
+    related:
+      - file: app/services/order_state.py
+        line_hint: 10

@@ -1,0 +1,25 @@
+issues:
+  - id: pr08-1
+    file: app/routes/exports.py
+    line_hint: 34            # `path = export_dir / filename` with filename taken from the query string
+    area: security
+    severity: high
+    requires: diff
+    description: >-
+      The output path is built directly from the user-supplied filename query parameter with no
+      validation. A value such as "../../app/main.py" (or an absolute path, which replaces the export
+      directory in pathlib's / operator) escapes the export directory, so the endpoint can overwrite
+      arbitrary files writable by the service and then return them. The existing JSON export derives
+      its file name from the user id for exactly this reason.
+
+  - id: pr08-2
+    file: app/routes/exports.py
+    line_hint: 30            # `def export_orders_csv(filename: str = ...)`: no get_current_user dependency
+    area: security
+    severity: high
+    rule_id: R1
+    requires: diff
+    description: >-
+      The new CSV export endpoint has no auth.get_current_user dependency (and no admin check), so
+      anyone can call it without logging in and download every customer's orders (user ids, statuses,
+      totals). Team rule R1 requires every route that touches user data to authenticate the caller.

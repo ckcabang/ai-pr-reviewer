@@ -81,6 +81,8 @@ class VerifiedFinding(Finding):
     verifier_reason: str = ""
     duplicate_of: str | None = None
     triage: Tier = "dropped"
+    triage_reason: str = ""
+    """Why triage dropped it (empty for kept findings)."""
 
 
 class ReviewResult(BaseModel):

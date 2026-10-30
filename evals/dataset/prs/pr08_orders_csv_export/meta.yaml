@@ -1,0 +1,11 @@
+id: pr08
+title: Add order export to CSV
+description: |
+  Finance wants a spreadsheet-friendly export of the order ledger, so this adds
+  `GET /exports/orders/csv`. It writes one row per order (id, user, status, total, item count) to a
+  CSV file in the export directory and returns it as a download.
+
+  - Optional `filename` query parameter (default `orders.csv`) so month-end exports can be kept
+    side by side in the export directory.
+  - Totals come from the existing `orders.to_out`, so they match what the API shows.
+  - Tests check the header, the rows and the custom filename.
