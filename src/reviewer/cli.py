@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 
 from reviewer.config import load_config
+from reviewer.context import build_context
+from reviewer.diff import parse_diff
 from reviewer.llm import Provider, build_provider
 from reviewer.models import ReviewInput, ReviewResult
 from reviewer.pipeline import review
@@ -31,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--base", required=True, metavar="REF", help="Base ref; reviews the diff BASE...HEAD.")
     p.add_argument("--title", default="", help="PR title (intent, treated as untrusted data).")
     p.add_argument("--description-file", metavar="FILE", help="File with the PR description.")
+    p.add_argument("--rules", metavar="FILE", help="Team rules file (default: REVIEW.md at the repo root).")
     p.add_argument("--format", choices=["md", "json", "both"], default="md", help="Output format (default: md).")
     p.add_argument("--out", metavar="PATH",
                    help="Write here instead of stdout. With --format both, PATH is a prefix and "
@@ -40,6 +43,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-cache", action="store_true", help="Do not read or write the disk cache.")
     p.add_argument("--verbose", action="store_true", help="Log progress to stderr.")
     p.add_argument("--config", metavar="FILE", help="Config file (default: config.yaml of the reviewer project).")
+
+    c = sub.add_parser("context", help="Print the context bundle the specialists would receive (debugging).")
+    c.add_argument("--repo", required=True, metavar="PATH", help="Git repository to read (any directory).")
+    c.add_argument("--base", required=True, metavar="REF", help="Base ref; uses the diff BASE...HEAD.")
+    c.add_argument("--rules", metavar="FILE", help="Team rules file (default: REVIEW.md at the repo root).")
+    c.add_argument("--config", metavar="FILE", help="Config file (default: config.yaml of the reviewer project).")
     return parser
 
 
@@ -48,15 +57,18 @@ def main(argv: list[str] | None = None, *, provider: Provider | None = None) -> 
     (tests inject a fake); the disk cache still applies on top of it."""
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.format == "both" and not args.out:
+    if args.command == "review" and args.format == "both" and not args.out:
         parser.error("--format both requires --out")
 
+    verbose = getattr(args, "verbose", False)
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr, format="%(message)s", force=True)
-    logging.getLogger("reviewer").setLevel(logging.INFO if args.verbose else logging.WARNING)
+    logging.getLogger("reviewer").setLevel(logging.INFO if verbose else logging.WARNING)
     try:
+        if args.command == "context":
+            return _context_command(args)
         return _review_command(args, provider)
     except Exception as e:  # every failure is exit code 2 with a message, never a traceback
-        if args.verbose:
+        if verbose:
             logging.getLogger("reviewer").exception("review failed")
         print(f"error: {e}", file=sys.stderr)
         return 2
@@ -83,12 +95,34 @@ def _review_command(args: argparse.Namespace, inner: Provider | None) -> int:
         diff=_git_diff(repo_root, args.base),
         title=args.title,
         description=description,
+        base_ref=args.base,
+        review_rules_path=Path(args.rules) if args.rules else None,
     )
     provider = build_provider(config, use_cache=not args.no_cache, inner=inner)
     result = review(review_input, provider=provider, config=config)
 
     _write_output(result, args.format, args.out)
     return exit_code_for(result, args.fail_on)
+
+
+def _context_command(args: argparse.Namespace) -> int:
+    """Print the context bundle for BASE...HEAD exactly as the specialists get it. No model calls."""
+    config = load_config(args.config)
+    repo_root = _repo_root(args.repo)
+    review_input = ReviewInput(
+        repo_root=repo_root,
+        diff=_git_diff(repo_root, args.base),
+        base_ref=args.base,
+        review_rules_path=Path(args.rules) if args.rules else None,
+    )
+    bundle = build_context(review_input, parse_diff(review_input.diff), config)
+    print(bundle.render())
+    s = bundle.stats
+    if s.get("enabled"):
+        print(f"context: {s.get('changed_functions', 0)} changed, {s.get('callers', 0)} caller(s), "
+              f"{s.get('callees', 0)} callee(s), {s['rules']} rule(s), {s['do_not_flag']} don't-flag item(s); "
+              f"{s.get('chars', 0)}/{s['budget']} chars", file=sys.stderr)
+    return 0
 
 
 def _write_output(result: ReviewResult, fmt: str, out: str | None) -> None:

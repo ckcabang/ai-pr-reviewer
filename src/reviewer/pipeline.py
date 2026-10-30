@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from reviewer.agents.base import SpecialistRun, SpecialistSpec, run_specialist
 from reviewer.agents.correctness import CORRECTNESS
 from reviewer.config import Config
+from reviewer.context import build_context
 from reviewer.diff import parse_diff
 from reviewer.llm import Provider, Usage
 from reviewer.models import SEVERITY_ORDER, ReviewInput, ReviewResult, VerifiedFinding
@@ -38,13 +39,15 @@ def review(review_input: ReviewInput, *, provider: Provider, config: Config) -> 
         return ReviewResult(findings=[], stats=_stats({}, [], 0, time.perf_counter() - started, config))
 
     log.info("reviewing %d file(s) with %d specialist(s)", len(files), len(SPECIALISTS))
+    bundle = build_context(review_input, files, config)  # context engine (#5): same bundle for every specialist
     runs: dict[str, tuple[SpecialistRun | Exception, float]] = {}
 
     def work(spec: SpecialistSpec):
         t0 = time.perf_counter()
         try:
             run: SpecialistRun | Exception = run_specialist(
-                spec, review_input=review_input, files=files, provider=provider, config=config
+                spec, review_input=review_input, files=files, provider=provider, config=config,
+                bundle=bundle,
             )
         except Exception as e:  # one specialist failing must not lose the others (spec story 44)
             run = e
@@ -73,6 +76,7 @@ def review(review_input: ReviewInput, *, provider: Provider, config: Config) -> 
         for f in findings
     ]
     stats = _stats(runs, [f.path for f in files], len(verified), time.perf_counter() - started, config)
+    stats["context"] = bundle.stats
     return ReviewResult(findings=verified, stats=stats)
 
 

@@ -55,6 +55,8 @@ class CallgraphConfig(_Section):
 
 
 class ContextConfig(_Section):
+    enabled: bool = True
+    """False gives specialists the diff only: no code context, no rules (the no-context ablation)."""
     semantic: SemanticConfig = SemanticConfig()
     callgraph: CallgraphConfig = CallgraphConfig()
     max_context_chars: int = 40000
