@@ -78,7 +78,8 @@ class PipelineConfig(_Section):
 class CacheConfig(_Section):
     enabled: bool = True
     dir: Path = Path(".cache")
-    """Relative paths are resolved against the config file's directory by `load_config`."""
+    """A relative path is resolved by `load_config` against the reviewer project's root, never
+    against the config file's directory or the reviewed repo (D24)."""
 
 
 class Config(_Section):
@@ -124,5 +125,7 @@ def load_config(path: str | Path | None = None) -> Config:
     except ValidationError as e:
         raise ConfigError(f"invalid config {path}:\n{e}") from e
     if not cfg.cache.dir.is_absolute():
-        cfg.cache.dir = (path.resolve().parent / cfg.cache.dir)
+        # Against the reviewer project, not the config file: a custom --config usually sits in the
+        # reviewed repo, and reviewing must not write into it (D24).
+        cfg.cache.dir = default_config_path().parent / cfg.cache.dir
     return cfg

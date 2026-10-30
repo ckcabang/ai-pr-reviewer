@@ -36,4 +36,4 @@ pipeline:
 
 cache:
   enabled: true
-  dir: .cache                 # relative paths resolve against this file's directory
+  dir: .cache                 # relative paths resolve against the reviewer project root, even for a custom --config

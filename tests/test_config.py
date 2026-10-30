@@ -1,7 +1,7 @@
 """Config: the committed config.yaml loads every section; the key comes only from the environment."""
 import pytest
 
-from reviewer.config import ConfigError, load_config
+from reviewer.config import ConfigError, default_config_path, load_config
 
 
 def test_committed_config_loads_every_section():
@@ -41,13 +41,25 @@ def test_cost_is_computed_from_configured_prices():
     assert cfg.cost_usd("unpriced-model", input_tokens=10, output_tokens=10) == 0.0
 
 
-def test_relative_cache_dir_is_resolved_against_the_config_file(tmp_path):
-    (tmp_path / "c.yaml").write_text(
+def test_relative_cache_dir_is_resolved_against_the_reviewer_project_never_the_config_file(tmp_path):
+    """A custom --config usually lives in the reviewed repo; its cache must not (D24)."""
+    reviewed_repo = tmp_path / "reviewed-repo"
+    reviewed_repo.mkdir()
+    (reviewed_repo / "reviewer.yaml").write_text(
         "models: {specialist: a, verifier: b, baseline: a, judge: c, embedding: e}\n"
     )
-    cfg = load_config(tmp_path / "c.yaml")
-    assert cfg.cache.dir == tmp_path / ".cache"
+    cfg = load_config(reviewed_repo / "reviewer.yaml")
+    assert cfg.cache.dir == default_config_path().parent / ".cache"
+    assert reviewed_repo not in cfg.cache.dir.parents
+    assert load_config().cache.dir == cfg.cache.dir  # same place as for the default config
     assert cfg.llm.base_url is None  # sections fall back to defaults
+
+
+def test_absolute_cache_dir_is_kept(tmp_path):
+    (tmp_path / "c.yaml").write_text(
+        f"models: {{specialist: a, verifier: b, baseline: a, judge: c, embedding: e}}\ncache: {{dir: {tmp_path}/mine}}\n"
+    )
+    assert load_config(tmp_path / "c.yaml").cache.dir == tmp_path / "mine"
 
 
 def test_api_key_comes_only_from_the_environment_variable_named_in_config(monkeypatch):
