@@ -5,10 +5,10 @@ from reviewer.triage import triage
 
 
 def vf(id="f1", *, file="a.py", line=10, category="logic", severity="high", confidence=0.9,
-       verdict="keep", duplicate_of=None, **kw):
+       verdict="keep", duplicate_of=None, title=None, explanation="e", **kw):
     return VerifiedFinding(
         id=id, reviewer="correctness", file=file, line=line, category=category, severity=severity,
-        confidence=confidence, title=f"title {id}", explanation="e", evidence="x",
+        confidence=confidence, title=title or f"title {id}", explanation=explanation, evidence="x",
         verdict=verdict, duplicate_of=duplicate_of, **kw)
 
 
@@ -37,21 +37,56 @@ def test_findings_flagged_as_duplicates_are_dropped():
     assert tiers(r) == {"a": "dropped", "b": "action_required"}
 
 
+# Two findings are near-duplicates only if they are about the same problem: same file and
+# category, lines within +-3, AND similar title/explanation text. Proximity alone is not enough.
+CACHE_A = dict(title="Cache entries never expire", explanation="The cache stores every entry forever, so stale values are served and memory grows without bound.")
+CACHE_B = dict(title="Cache entries are never evicted", explanation="Entries stored in the cache are never evicted or expired, so memory grows without bound and stale values are served.")
+RETRY = dict(title="Retry loop has no backoff", explanation="The client retries immediately in a tight loop, hammering the upstream service during an outage.")
+
+
 def test_near_duplicates_collapse_to_the_highest_confidence():
     r = run([
-        vf("a", line=10, confidence=0.8),
-        vf("b", line=13, confidence=0.95),   # within +-3 of a, same file and category
-        vf("c", line=14, confidence=0.9),    # 1 away from the kept b -> collapses into b
+        vf("a", line=10, confidence=0.8, **CACHE_A),
+        vf("b", line=13, confidence=0.95, **CACHE_B),   # within +-3 of a, same file, category and problem
+        vf("c", line=14, confidence=0.9, **CACHE_A),    # 1 away from the kept b -> collapses into b
     ])
     assert tiers(r) == {"b": "action_required", "a": "dropped", "c": "dropped"}
+    assert r.dropped_by_reason == {"near_duplicate": 2}
 
 
-def test_lines_more_than_three_apart_or_different_file_or_category_are_not_collapsed():
+def test_the_same_problem_on_the_same_line_collapses():
+    r = run([vf("a", line=10, confidence=0.8, **CACHE_A), vf("b", line=10, confidence=0.9, **CACHE_B)])
+    assert tiers(r) == {"b": "action_required", "a": "dropped"}
+
+
+def test_distinct_problems_close_together_are_both_kept():
+    # same file, same category, 3 lines apart: proximity alone must not merge different problems
+    r = run([vf("a", line=10, **CACHE_A), vf("b", line=13, **RETRY)])
+    assert tiers(r) == {"a": "action_required", "b": "action_required"}
+    assert r.dropped_by_reason == {}
+
+
+def test_distinct_problems_on_the_very_same_line_are_both_kept():
+    r = run([vf("a", line=10, **CACHE_A), vf("b", line=10, **RETRY)])
+    assert tiers(r) == {"a": "action_required", "b": "action_required"}
+
+
+def test_similar_findings_far_apart_or_in_another_file_or_category_are_not_collapsed():
     r = run([
-        vf("a", line=10), vf("b", line=14), vf("c", line=10, file="b.py"),
-        vf("d", line=10, category="auth"),
+        vf("a", line=10, **CACHE_A), vf("b", line=14, **CACHE_B), vf("c", line=10, file="b.py", **CACHE_B),
+        vf("d", line=10, category="auth", **CACHE_B),
     ])
     assert all(t == "action_required" for t in tiers(r).values())
+
+
+def test_text_similarity_ignores_case_punctuation_and_common_words():
+    r = run([
+        vf("a", line=10, confidence=0.8, title="The cache never expires entries!",
+           explanation="Entries are stored in the cache and are never expired."),
+        vf("b", line=11, confidence=0.9, title="Cache: entries never expire",
+           explanation="The entries are stored in the cache and never expire."),
+    ])
+    assert tiers(r) == {"b": "action_required", "a": "dropped"}
 
 
 def test_action_required_needs_configured_severity_and_minimum_confidence():

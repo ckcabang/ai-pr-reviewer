@@ -124,6 +124,19 @@ def test_verifier_gets_every_finding_in_one_call_with_source_window_rules_and_do
         assert phrase in call.system.lower()
 
 
+def test_verifier_applies_team_rules_to_application_code_and_test_code_only_for_real_test_defects(
+        review_input, config, keep_all):
+    provider = FakeProvider({"correctness": {"findings": [finding(1)]}, "verifier": keep_all})
+
+    review(review_input, provider=provider, config=config)
+
+    [call] = provider.calls_for("verifier")
+    system = call.system.lower()
+    assert "application" in system and "production" in system
+    assert "test code" in system and "fixture" in system and "defect in the test" in system
+    assert "sql" not in system and "pr0" not in system and "pr1" not in system
+
+
 def test_more_than_fifteen_findings_are_split_into_batches_by_file(tmp_path, make_repo, diff_of, config, keep_all):
     files = {f"app/m{i}.py": "\n".join(BASE_LINES) + "\n" for i in range(4)}
     changed = {p: "\n".join(HEAD_LINES) + "\n" for p in files}

@@ -1,12 +1,15 @@
 """Triage: deterministic code, no LLM. Verified findings in, tiered and sorted findings out."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from reviewer.config import PipelineConfig
 from reviewer.models import SEVERITY_ORDER, VerifiedFinding
 
 NEAR_DUPLICATE_LINES = 3
+NEAR_DUPLICATE_SIMILARITY = 0.25
+"""Minimum word overlap (Jaccard, title + explanation) for two nearby findings to be the same problem."""
 LOW_SEVERITY_MIN_CONFIDENCE = 0.9
 
 
@@ -41,14 +44,17 @@ def triage(findings: list[VerifiedFinding], config: PipelineConfig) -> TriageRes
         else:
             survivors.append(f)
 
-    # 2. near-duplicates: same file and category, lines within +-3; highest confidence wins
+    # 2. near-duplicates: same file and category, lines within +-3 and about the same problem
+    #    (similar text); highest confidence wins. Closeness alone is not enough (D46).
     kept: list[VerifiedFinding] = []
+    words = {f.id: _words(f) for f in survivors}
     for f in sorted(survivors, key=lambda f: (-f.confidence, *_rank(f))):
         twin = next((k for k in kept if k.file == f.file and k.category == f.category
-                     and abs(k.line - f.line) <= NEAR_DUPLICATE_LINES), None)
+                     and abs(k.line - f.line) <= NEAR_DUPLICATE_LINES
+                     and _similarity(words[k.id], words[f.id]) >= NEAR_DUPLICATE_SIMILARITY), None)
         if twin:
             drop(f, "near_duplicate", f"near-duplicate of {twin.id} (same file and category, "
-                                      f"within {NEAR_DUPLICATE_LINES} lines)")
+                                      f"within {NEAR_DUPLICATE_LINES} lines, similar text)")
         else:
             kept.append(f)
 
@@ -76,3 +82,23 @@ def triage(findings: list[VerifiedFinding], config: PipelineConfig) -> TriageRes
 def _rank(f: VerifiedFinding) -> tuple:
     """Severity, then confidence (descending), then a stable tiebreak."""
     return (SEVERITY_ORDER[f.severity], -f.confidence, f.file, f.line, f.id)
+
+
+_STOPWORDS = frozenset("""the and for are but not you all any can has have had was were will with without this that
+these those from into onto than then them they their there its what when where which who why how also may might
+must should would could does did been being such only other more most some one two""".split())
+
+
+def _words(f: VerifiedFinding) -> frozenset[str]:
+    """The content words of a finding's title and explanation (lowercase, no stopwords, with a
+    crude plural/-ing/-ed strip). Evidence is left out: two findings on one line quote the same code."""
+    out = set()
+    for w in re.findall(r"[a-z0-9]+", f"{f.title} {f.explanation}".lower()):
+        if len(w) > 2 and w not in _STOPWORDS:
+            out.add(re.sub(r"(ing|ed|es|s)$", "", w) if len(w) > 4 else w)
+    return frozenset(out)
+
+
+def _similarity(a: frozenset[str], b: frozenset[str]) -> float:
+    """Jaccard overlap of two word sets (0 when both are empty)."""
+    return len(a & b) / len(a | b) if a | b else 0.0

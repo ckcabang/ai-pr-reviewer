@@ -125,6 +125,18 @@ def test_standards_prompt_requires_a_rule_id_and_the_quoted_rule_text(review_inp
     assert "specific" in system.lower() and "team_rules" in system
 
 
+def test_standards_prompt_applies_rules_to_application_code_not_to_test_code(review_input, config, keep_all):
+    provider = provider_for(keep_all, correctness=[], security=[], standards=[])
+
+    review(review_input, provider=provider, config=config)
+
+    system = provider.calls_for("standards")[0].system.lower()
+    assert "application" in system and "production" in system
+    assert "test code" in system and "fixture" in system
+    # the guidance is general: no dataset rule topics, file names or PR ids in the prompt text
+    assert "sql" not in system and "pr0" not in system and "pr1" not in system
+
+
 def test_a_standards_finding_must_cite_a_rule_that_exists(review_input, config, keep_all):
     no_rule = {**STANDARD, "title": "No rule cited", "rule_id": None}
     made_up = {**STANDARD, "title": "Invented rule", "rule_id": "R42"}
