@@ -91,7 +91,8 @@ def review(review_input: ReviewInput, *, provider: Provider, config: Config, ver
     # Verifier (skippable for ablations) -> triage.
     t0 = time.perf_counter()
     if verify:
-        vrun = run_verifier(findings, review_input=review_input, files=files, provider=provider, config=config)
+        vrun = run_verifier(findings, review_input=review_input, files=files, provider=provider, config=config,
+                            context=bundle.code)
         verified = vrun.findings
     else:
         vrun, verified = None, skip_verifier(findings)

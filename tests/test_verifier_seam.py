@@ -213,3 +213,41 @@ def test_verifier_prompt_defangs_tags_in_untrusted_text(review_input, config, ke
     review(review_input, provider=provider, config=config)
     [call] = provider.calls_for("verifier")
     assert call.user.count("<finding id=") == 1 and call.user.count("</finding>") == 1
+
+
+def _caller_repo(tmp_path, make_repo, diff_of):
+    pricing = "def compute_total(x):\n    return x\n"
+    invoice = ("from pricing import compute_total\n\n\ndef build_invoice(x):\n"
+               "    return {'amount_due': compute_total(x)}\n")
+    repo = make_repo(tmp_path / "callers", {"pricing.py": pricing, "invoice.py": invoice},
+                     {"pricing.py": "def compute_total(x):\n    return int(x * 100)\n"})
+    return ReviewInput(repo_root=repo, diff=diff_of(repo), title="Cents", description="d")
+
+
+def test_verifier_sees_callers_and_callees_from_the_context_bundle(tmp_path, make_repo, diff_of, config, keep_all):
+    ri = _caller_repo(tmp_path, make_repo, diff_of)
+    provider = FakeProvider({
+        "correctness": {"findings": [finding(1, file="pricing.py", line=2)]},
+        "verifier": keep_all,
+    })
+
+    review(ri, provider=provider, config=config)
+
+    [call] = provider.calls_for("verifier")
+    assert "<context>" in call.user and "</context>" in call.user
+    assert "build_invoice" in call.user.split("<context>")[1]  # the unchanged caller, outside the source window
+    assert "context" in call.system.lower()
+
+
+def test_verifier_gets_no_context_section_when_the_context_is_disabled(tmp_path, make_repo, diff_of, config, keep_all):
+    ri = _caller_repo(tmp_path, make_repo, diff_of)
+    config.context.enabled = False  # no-context ablation: the verifier must not see more than the specialists
+    provider = FakeProvider({
+        "correctness": {"findings": [finding(1, file="pricing.py", line=2)]},
+        "verifier": keep_all,
+    })
+
+    review(ri, provider=provider, config=config)
+
+    [call] = provider.calls_for("verifier")
+    assert "<context>" not in call.user and "build_invoice" not in call.user
