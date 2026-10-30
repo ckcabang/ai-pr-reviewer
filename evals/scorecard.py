@@ -417,7 +417,7 @@ def _examples(summary: dict, results: dict, arms: list[str]) -> str:
             body = "".join(_finding_html(f, full=False, tag=' <span class="ok">✓ same problem</span>' if i in ref_matched else "")
                            for i, f in enumerate(findings))
             re_ = summary[ref]["per_pr"][pr["id"]]["expected"][issue["id"]]
-            verdict = (f'<p class="ok">Found this issue.</p>' if ref_matched else
+            verdict = ('<p class="ok">Found this issue.</p>' if ref_matched else
                        f'<p class="miss">Did not find this issue in this run'
                        f' ({re_["matched"]} of {re_["runs"]} runs found it).</p>')
             if not findings:

@@ -60,13 +60,13 @@ def triage(findings: list[VerifiedFinding], config: PipelineConfig) -> TriageRes
 
     # 3. low severity needs high confidence; then tier
     tiered: list[VerifiedFinding] = []
-    ar = config.action_required
+    action_rule = config.action_required
     for f in kept:
         if f.severity == "low" and f.confidence < LOW_SEVERITY_MIN_CONFIDENCE:
             drop(f, "low_severity", f"low severity with confidence {f.confidence:.2f} "
                                     f"< {LOW_SEVERITY_MIN_CONFIDENCE}")
             continue
-        action = f.severity in ar.severities and f.confidence >= ar.min_confidence
+        action = action_rule.applies(f.severity, f.confidence)
         tiered.append(f.model_copy(update={
             "triage": "action_required" if action else "review_recommended", "triage_reason": ""}))
 

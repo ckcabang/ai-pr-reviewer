@@ -91,11 +91,11 @@ def review(review_input: ReviewInput, *, provider: Provider, config: Config, ver
     # Verifier (skippable for ablations) -> triage.
     t0 = time.perf_counter()
     if verify:
-        vrun = run_verifier(findings, review_input=review_input, files=files, provider=provider, config=config,
+        verifier_run = run_verifier(findings, review_input=review_input, files=files, provider=provider, config=config,
                             context=bundle.code)
-        verified = vrun.findings
+        verified = verifier_run.findings
     else:
-        vrun, verified = None, skip_verifier(findings)
+        verifier_run, verified = None, skip_verifier(findings)
     verifier_wall = time.perf_counter() - t0
     after_verifier = sum(1 for f in verified if f.verdict == "keep" and not f.duplicate_of)
     triaged = triage(verified, config.pipeline)
@@ -105,27 +105,27 @@ def review(review_input: ReviewInput, *, provider: Provider, config: Config, ver
     stats["counts"]["after_triage"] = sum(1 for f in triaged.findings if f.triage != "dropped")
     stats["context"] = bundle.stats  # context engine (#5)
     stats.setdefault("stages", {}).update({
-        "verifier": _verifier_stats(vrun, len(findings), verifier_wall, config),
+        "verifier": _verifier_stats(verifier_run, len(findings), verifier_wall, config),
         "triage": {"dropped_by_reason": triaged.dropped_by_reason, "cap_removed": triaged.cap_removed},
     })
-    if vrun:
-        _add_usage(stats, vrun.usage, config.cost_usd(
-            config.models.verifier, input_tokens=vrun.usage.input_tokens, output_tokens=vrun.usage.output_tokens))
+    if verifier_run:
+        _add_usage(stats, verifier_run.usage, config.cost_usd(
+            config.models.verifier, input_tokens=verifier_run.usage.input_tokens, output_tokens=verifier_run.usage.output_tokens))
     return ReviewResult(findings=triaged.findings, stats=stats)
 
 
-def _verifier_stats(vrun, findings_in: int, wall_s: float, config: Config) -> dict:
-    if vrun is None:
+def _verifier_stats(verifier_run, findings_in: int, wall_s: float, config: Config) -> dict:
+    if verifier_run is None:
         return {"status": "skipped", "findings_in": findings_in}
-    u = vrun.usage
+    u = verifier_run.usage
     return {
-        "status": vrun.status, "model": config.models.verifier, "wall_s": round(wall_s, 3),
+        "status": verifier_run.status, "model": config.models.verifier, "wall_s": round(wall_s, 3),
         "input_tokens": u.input_tokens, "output_tokens": u.output_tokens,
         "cost_usd": config.cost_usd(config.models.verifier, input_tokens=u.input_tokens,
                                     output_tokens=u.output_tokens),
         "calls": u.calls, "cache_hits": u.cache_hits, "cached": u.cached,
-        "findings_in": findings_in, "batches": vrun.batches, "failed_batches": vrun.failed_batches,
-        "missing_verdicts": vrun.missing_verdicts, "errors": vrun.errors,
+        "findings_in": findings_in, "batches": verifier_run.batches, "failed_batches": verifier_run.failed_batches,
+        "missing_verdicts": verifier_run.missing_verdicts, "errors": verifier_run.errors,
     }
 
 

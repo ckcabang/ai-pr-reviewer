@@ -66,6 +66,10 @@ class ActionRequiredConfig(_Section):
     severities: list[Literal["critical", "high", "medium", "low"]] = ["critical", "high"]
     min_confidence: float = 0.75
 
+    def applies(self, severity: str, confidence: float) -> bool:
+        """The one definition of "action required", shared by triage and the baseline arm."""
+        return severity in self.severities and confidence >= self.min_confidence
+
 
 class PipelineConfig(_Section):
     max_workers: int = 4

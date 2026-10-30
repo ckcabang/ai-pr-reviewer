@@ -7,7 +7,7 @@ import json
 import math
 import threading
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from reviewer.llm import Usage, parse_json_text
 

@@ -9,7 +9,6 @@ and the id of the finding a duplicate repeats. Deciding what survives is triage'
 from __future__ import annotations
 
 import re
-import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -48,7 +47,7 @@ Reply with a single JSON object and nothing else, with exactly one verdict per f
 {"verdicts": [{"id": "...", "verdict": "keep | drop", "confidence": 0.8, "severity": "high", "reason": "...", "duplicate_of": null}]}"""
 
 
-class Verdict_(BaseModel):
+class VerifierVerdict(BaseModel):
     """One verifier verdict (LLM output contract)."""
 
     model_config = ConfigDict(extra="ignore")
@@ -67,7 +66,7 @@ class Verdict_(BaseModel):
 
 
 class VerifierResponse(BaseModel):
-    verdicts: list[Verdict_]
+    verdicts: list[VerifierVerdict]
 
 
 @dataclass
@@ -125,7 +124,7 @@ def run_verifier(
             return batch, None, Usage(), e
 
     run = VerifierRun(findings=[], batches=len(batches))
-    verdicts: dict[str, Verdict_] = {}
+    verdicts: dict[str, VerifierVerdict] = {}
     unverified: dict[str, str] = {}
     with ThreadPoolExecutor(max_workers=max(1, config.pipeline.max_workers)) as pool:
         for batch, reply, usage, error in pool.map(work, batches):
@@ -148,7 +147,7 @@ def run_verifier(
 
 
 def apply_verdicts(
-    findings: list[Finding], verdicts: dict[str, Verdict_], unverified: dict[str, str] | None = None
+    findings: list[Finding], verdicts: dict[str, VerifierVerdict], unverified: dict[str, str] | None = None
 ) -> list[VerifiedFinding]:
     """Merge verdicts into findings. A finding without a verdict is kept as proposed."""
     unverified = unverified or {}
@@ -220,11 +219,11 @@ def build_user_prompt(
 ) -> str:
     parts = []
     if context:
-        parts.append(f"<context>\n{_defang(context)}\n</context>")
+        parts.append(f"<context>\n{escape_prompt_tags(context)}\n</context>")
     if rules:
-        parts.append(f"<team_rules>\n{_defang(rules)}\n</team_rules>")
+        parts.append(f"<team_rules>\n{escape_prompt_tags(rules)}\n</team_rules>")
     if do_not_flag:
-        parts.append(f"<do_not_flag>\n{_defang(do_not_flag)}\n</do_not_flag>")
+        parts.append(f"<do_not_flag>\n{escape_prompt_tags(do_not_flag)}\n</do_not_flag>")
     for f in batch:
         window = source_window(repo_root, f.file, f.line, added.get(f.file, set()))
         body = (
@@ -234,13 +233,14 @@ def build_user_prompt(
             + (f"rule: {f.rule_id}\n" if f.rule_id else "")
             + f"source, {window}"
         )
-        parts.append(f'<finding id="{f.id}">\n{_defang(body)}\n</finding>')
+        parts.append(f'<finding id="{f.id}">\n{escape_prompt_tags(body)}\n</finding>')
     parts.append("Verify every finding above and reply with the JSON object.")
     return "\n\n".join(parts)
 
 
-def _defang(text: str) -> str:
-    """Stop untrusted text from forging or closing the tags around it."""
+def escape_prompt_tags(text: str) -> str:
+    """Stop untrusted text from forging or closing the prompt's own tags (finding, team_rules,
+    do_not_flag, context); everything else, code included, stays as it is."""
     return re.sub(r"</?\s*(finding|team_rules|do_not_flag|context)\b", lambda m: m.group(0).replace("<", "&lt;"), text)
 
 

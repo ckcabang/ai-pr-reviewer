@@ -1,6 +1,5 @@
 """Seam: the dataset loader + materializer (evals.dataset)."""
 import subprocess
-from pathlib import Path
 
 import pytest
 import yaml

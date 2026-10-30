@@ -44,7 +44,7 @@ def review_baseline(review_input: ReviewInput, *, provider: Provider, config: Co
         model=config.models.baseline,
     )
     wall = time.perf_counter() - t0
-    rule = config.pipeline.action_required
+    action_rule = config.pipeline.action_required
     findings = sorted(run.findings, key=lambda f: (SEVERITY_ORDER[f.severity], -f.confidence))
     verified = [
         # No verifier and no threshold (D7). The tier only labels the alarm level, using the
@@ -52,9 +52,7 @@ def review_baseline(review_input: ReviewInput, *, provider: Provider, config: Co
         # means the same thing for both arms.
         VerifiedFinding(
             **f.model_dump(), verdict="keep", verifier_reason="",
-            triage="action_required"
-            if f.severity in rule.severities and f.confidence >= rule.min_confidence
-            else "review_recommended",
+            triage="action_required" if action_rule.applies(f.severity, f.confidence) else "review_recommended",
         )
         for f in findings
     ]
