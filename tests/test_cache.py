@@ -1,5 +1,6 @@
 """Disk cache: a repeat review is served from disk and flagged as cached."""
-from conftest import diff_of, make_repo
+import pytest
+
 from reviewer.fake import FakeProvider
 from reviewer.llm import CachedProvider
 from reviewer.models import ReviewInput
@@ -12,15 +13,15 @@ FINDING = {
 }
 
 
-def make_input(tmp_path):
+@pytest.fixture
+def review_input(tmp_path, make_repo, diff_of):
     repo = make_repo(tmp_path / "repo", {"a.py": "x = 1\ny = 1\n"}, {"a.py": "x = 1\nx = 2\n"})
     return ReviewInput(repo_root=repo, diff=diff_of(repo), title="t")
 
 
-def test_repeat_review_is_served_from_cache_and_flagged_cached(tmp_path, config):
+def test_repeat_review_is_served_from_cache_and_flagged_cached(tmp_path, config, review_input):
     fake = FakeProvider({"correctness": {"findings": [FINDING]}})
     provider = CachedProvider(fake, tmp_path / "cache")
-    review_input = make_input(tmp_path)
 
     first = review(review_input, provider=provider, config=config)
     second = review(review_input, provider=provider, config=config)

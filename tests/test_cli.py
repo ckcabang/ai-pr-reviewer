@@ -7,7 +7,6 @@ import sys
 import pytest
 import yaml
 
-from conftest import make_repo
 from reviewer.cli import exit_code_for, main
 from reviewer.config import default_config_path
 from reviewer.fake import FakeProvider
@@ -20,7 +19,7 @@ FINDING = {
 
 
 @pytest.fixture
-def repo(tmp_path):
+def repo(tmp_path, make_repo):
     return make_repo(tmp_path / "repo", {"a.py": "x = 1\ny = 1\n"}, {"a.py": "x = 1\nx = 2\n"})
 
 

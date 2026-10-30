@@ -1,4 +1,7 @@
-"""Shared test helpers: real temporary git repos, the committed config."""
+"""Shared test helpers: real temporary git repos, the committed config.
+
+Helpers are exposed as fixtures because pytest runs in importlib mode (see pyproject),
+so test modules cannot import from conftest."""
 from __future__ import annotations
 
 import os
@@ -24,7 +27,7 @@ def git(repo: Path, *args: str) -> str:
     return out.stdout
 
 
-def make_repo(root: Path, base: dict[str, str], head: dict[str, str | None]) -> Path:
+def _make_repo(root: Path, base: dict[str, str], head: dict[str, str | None]) -> Path:
     """Create a git repo with `base` committed on `main`, then `head` applied and committed
     (a None value deletes the file). Returns the repo path; diff it with `main...HEAD`."""
     root.mkdir(parents=True, exist_ok=True)
@@ -49,8 +52,20 @@ def _write(root: Path, files: dict[str, str | None]) -> None:
         path.write_text(content)
 
 
-def diff_of(repo: Path, base: str = "main") -> str:
+def _diff_of(repo: Path, base: str = "main") -> str:
     return git(repo, "diff", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "-M", f"{base}...HEAD")
+
+
+@pytest.fixture
+def make_repo():
+    """`make_repo(root, base_files, head_files)` -> repo path (see `_make_repo`)."""
+    return _make_repo
+
+
+@pytest.fixture
+def diff_of():
+    """`diff_of(repo, base="main")` -> unified diff text of base...HEAD."""
+    return _diff_of
 
 
 @pytest.fixture

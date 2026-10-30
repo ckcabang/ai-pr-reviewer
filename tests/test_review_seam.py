@@ -3,7 +3,6 @@ import json
 
 import pytest
 
-from conftest import diff_of, make_repo
 from reviewer.fake import FakeProvider
 from reviewer.models import ReviewInput
 from reviewer.pipeline import AllSpecialistsFailed, review
@@ -39,7 +38,7 @@ FINDING = {
 
 
 @pytest.fixture
-def review_input(tmp_path):
+def review_input(tmp_path, make_repo, diff_of):
     repo = make_repo(tmp_path / "repo", BASE, HEAD)
     return ReviewInput(
         repo_root=repo,
