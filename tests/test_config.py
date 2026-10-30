@@ -13,7 +13,7 @@ def test_committed_config_loads_every_section():
     assert cfg.context.semantic.enabled and cfg.context.semantic.top_k == 8
     assert cfg.context.callgraph.max_callers == 5
     assert cfg.context.max_context_chars == 40000
-    assert cfg.pipeline.max_findings_per_agent == 5
+    assert cfg.pipeline.max_findings_per_specialist == 5
     assert cfg.pipeline.confidence_threshold == 0.6
     assert cfg.pipeline.action_required.severities == ["critical", "high"]
     assert cfg.pipeline.action_required.min_confidence == 0.75

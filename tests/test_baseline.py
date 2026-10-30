@@ -68,7 +68,7 @@ def test_baseline_findings_are_scored_raw_with_no_confidence_threshold(review_in
 
 
 def test_baseline_applies_only_the_per_reviewer_cap_and_the_anchor_check(review_input, config):
-    config.pipeline.max_findings_per_agent = 2
+    config.pipeline.max_findings_per_specialist = 2
     many = [{**FINDING, "title": f"P{i}", "confidence": 0.5 + i / 20} for i in range(4)]
     off_diff = {**FINDING, "line": 99, "title": "Imaginary", "confidence": 1.0}
     provider = FakeProvider({"baseline": {"findings": [off_diff, *many]}})

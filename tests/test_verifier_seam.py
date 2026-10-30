@@ -141,7 +141,7 @@ def test_more_than_fifteen_findings_are_split_into_batches_by_file(tmp_path, mak
     files = {f"app/m{i}.py": "\n".join(BASE_LINES) + "\n" for i in range(4)}
     changed = {p: "\n".join(HEAD_LINES) + "\n" for p in files}
     repo = make_repo(tmp_path / "repo", files, changed)
-    config.pipeline.max_findings_per_agent = 20
+    config.pipeline.max_findings_per_specialist = 20
     config.pipeline.max_findings_total = 50
     raw = [finding(f"{i}-{n}", file=f"app/m{i}.py", line=30, category=f"c{n}", title=f"P {i} {n}")
            for i in range(4) for n in range(5)]  # 20 findings, 5 per file

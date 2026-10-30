@@ -6,7 +6,7 @@
 
 `main` is the base state of `demo_service/` (REVIEW.md at the root) plus the example adopter workflow;
 each selected dataset PR becomes a branch named after its id, one commit ahead of `main`, and a PR.
-Only the patch's effect is pushed: labels (expected issues), `meta.yaml` and `change.patch` never are.
+Only the patch's effect is pushed: the expected issues (`labels.yaml`), `meta.yaml` and `change.patch` never are.
 Needs `git` and an authenticated `gh`. Adding the OPENAI_API_KEY secret to the demo repo is a manual
 owner step. Re-running is safe: SHAs are deterministic, an existing PR is left alone; pass `--force` to
 overwrite branches after changing e.g. `--action-ref`.

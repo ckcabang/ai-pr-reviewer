@@ -145,7 +145,7 @@ def run_specialist(
     """Run one specialist over the diff and its context bundle (none = diff only). Findings
     are capped at the configured maximum (highest confidence kept) and must anchor on a
     line inside the diff (D2, D25); a specialist that `needs_rules` must also cite a rule that exists."""
-    cap = config.pipeline.max_findings_per_agent
+    cap = config.pipeline.max_findings_per_specialist
     bundle = bundle or ContextBundle()
     reply, usage = chat_validated(
         provider,

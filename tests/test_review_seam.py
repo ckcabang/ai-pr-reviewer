@@ -103,12 +103,12 @@ def test_specialist_sees_the_numbered_diff_and_untrusted_pr_text_but_no_lock_fil
     assert "untrusted" in call.user.lower()
     # the prompt states the empty-list rule and the configured finding cap
     assert "empty list" in call.system.lower()
-    assert f"at most {config.pipeline.max_findings_per_agent}" in call.system.lower()
+    assert f"at most {config.pipeline.max_findings_per_specialist}" in call.system.lower()
     assert "JSON" in call.system
 
 
 def test_findings_are_capped_at_the_configured_maximum(review_input, config):
-    config.pipeline.max_findings_per_agent = 2
+    config.pipeline.max_findings_per_specialist = 2
     many = [{**FINDING, "title": f"Problem {i}", "confidence": 0.5 + i / 20} for i in range(5)]
     provider = FakeProvider({"security": QUIET, "correctness": {"findings": many}})
 

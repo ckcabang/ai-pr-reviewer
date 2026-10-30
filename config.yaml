@@ -29,7 +29,7 @@ context:
 
 pipeline:
   max_workers: 4
-  max_findings_per_agent: 5
+  max_findings_per_specialist: 5
   confidence_threshold: 0.6
   action_required: {severities: [critical, high], min_confidence: 0.75}
   max_findings_total: 10

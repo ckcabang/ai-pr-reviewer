@@ -69,7 +69,7 @@ class ActionRequiredConfig(_Section):
 
 class PipelineConfig(_Section):
     max_workers: int = 4
-    max_findings_per_agent: int = 5
+    max_findings_per_specialist: int = 5
     confidence_threshold: float = 0.6
     action_required: ActionRequiredConfig = ActionRequiredConfig()
     max_findings_total: int = 10
