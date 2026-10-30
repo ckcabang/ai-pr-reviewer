@@ -72,7 +72,7 @@ scripts/demo.sh pr09 --no-cache     # cross-file bug: pricing.py now returns cen
 scripts/demo.sh pr06                # a clean refactor: should say "No findings"
 ```
 
-`scripts/demo.sh PR [review args]` materializes the dataset PR into a temporary repo and runs `reviewer review` on it with the PR's own title and description. Drop `--no-cache` to use the disk cache (`.cache/`, gitignored): the first run still calls the API, repeats are instant and marked `(cached)`.
+`scripts/demo.sh PR [review args]` materializes the dataset PR into a temporary repo and runs `reviewer review` on it with the PR's own title and description. Drop `--no-cache` to use the disk cache (`.cache/`, gitignored): the first run still calls the API, repeats are instant and marked `(cached)`. The API key is only read when a call misses the cache, so a fully cached replay works with `OPENAI_API_KEY` unset; a cache miss without a key stops with `error: API key not set: ...` (exit 2).
 
 **Review your own branch.**
 

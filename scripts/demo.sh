@@ -5,8 +5,9 @@
 #   scripts/demo.sh pr06              # the clean PR (should be quiet)
 #   scripts/demo.sh pr09 --no-cache   # fresh, real API calls (anything after the PR id goes to `review`)
 #
-# Needs OPENAI_API_KEY in the environment (or run under `uv run --env-file .env`). The review
-# uses the project's config.yaml, so the cache is <project>/.cache (D24).
+# Needs OPENAI_API_KEY (or `uv run --env-file .env`) only for calls that are not in the cache: a
+# fully cached replay runs with no key at all. The review uses the project's config.yaml, so the
+# cache is <project>/.cache (D24).
 set -euo pipefail
 pr="${1:?usage: scripts/demo.sh pr09|pr06 [review args...]}"; shift || true
 root="$(cd "$(dirname "$0")/.." && pwd)"

@@ -13,14 +13,13 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 from reviewer.context.chunker import Chunk
+from reviewer.llm import write_json_atomic
 
 if TYPE_CHECKING:
     from reviewer.context.callgraph import RepoIndex
@@ -131,10 +130,6 @@ def _read_entry(entry: Path | None, chunks: list[Chunk]) -> dict[str, list[float
 
 def _write_entry(entry: Path, vectors: dict[str, list[float]]) -> None:
     try:
-        entry.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=entry.parent, suffix=".tmp")
-        with os.fdopen(fd, "w") as fh:
-            json.dump(vectors, fh)
-        os.replace(tmp, entry)  # atomic, so parallel runs never read half a file
+        write_json_atomic(entry, vectors)
     except OSError as e:  # a cache that cannot be written is only a missed speed-up
         log.warning("could not write the embedding cache %s: %s", entry, e)

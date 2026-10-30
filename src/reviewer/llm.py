@@ -9,8 +9,9 @@ import json
 import os
 import re
 import tempfile
+import threading
 from pathlib import Path
-from typing import Protocol, TypeVar
+from typing import Callable, Protocol, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -131,6 +132,38 @@ def chat_validated(
         raise ResponseValidationError(f"invalid reply even after one repair retry: {e}") from e
 
 
+def write_json_atomic(path: Path, payload) -> None:
+    """Write `payload` as JSON via a temp file and rename, so parallel workers never read half a file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    with os.fdopen(fd, "w") as fh:
+        json.dump(payload, fh)
+    os.replace(tmp, path)
+
+
+class LazyProvider:
+    """Builds the real provider on first use, so work served entirely from the disk cache
+    never needs credentials. A build failure (a missing API key) surfaces on the first call
+    that actually reaches the model."""
+
+    def __init__(self, factory: Callable[[], Provider]):
+        self._factory = factory
+        self._inner: Provider | None = None
+        self._lock = threading.Lock()
+
+    def _get(self) -> Provider:
+        with self._lock:
+            if self._inner is None:
+                self._inner = self._factory()
+            return self._inner
+
+    def chat_json(self, *, role, model, system, user, temperature=0.0):
+        return self._get().chat_json(role=role, model=model, system=system, user=user, temperature=temperature)
+
+    def embed(self, *, model, texts):
+        return self._get().embed(model=model, texts=texts)
+
+
 class CachedProvider:
     """Disk cache in front of any provider. Chat is keyed by sha256(model, system, user,
     temperature); embeddings by sha256(model, text). Hits are flagged in the usage."""
@@ -178,21 +211,24 @@ class CachedProvider:
 
     @staticmethod
     def _write(path: Path, payload: dict) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-        with os.fdopen(fd, "w") as fh:
-            json.dump(payload, fh)
-        os.replace(tmp, path)  # atomic, so parallel workers never read half a file
+        write_json_atomic(path, payload)
 
 
-def build_provider(config: Config, *, use_cache: bool = True, inner: Provider | None = None) -> Provider:
+def build_provider(config: Config, *, use_cache: bool = True, inner: Provider | None = None,
+                   lazy: bool = True) -> Provider:
     """The provider the CLI uses: the real OpenAI-compatible one (reads the API key from
     the environment) unless `inner` is given, wrapped in the disk cache unless it is
-    disabled in config or by `use_cache=False` (`--no-cache`)."""
+    disabled in config or by `use_cache=False` (`--no-cache`).
+
+    The real provider is built lazily (`lazy=True`): the key is only needed on a cache miss.
+    `lazy=False` builds it now and fails at once without a key (the eval always calls the API)."""
     if inner is None:
         from reviewer.openai_provider import OpenAIProvider
 
-        inner = OpenAIProvider.from_config(config)
+        if lazy:
+            inner = LazyProvider(lambda: OpenAIProvider.from_config(config))
+        else:
+            inner = OpenAIProvider.from_config(config)
     if use_cache and config.cache.enabled:
         return CachedProvider(inner, config.cache.dir)
     return inner

@@ -172,3 +172,20 @@ def test_real_process_without_api_key_exits_2_with_a_clear_message(repo, config_
     )
     assert out.returncode == 2
     assert "OPENAI_API_KEY" in out.stderr
+
+
+def test_a_fully_cached_review_replays_without_an_api_key(repo, config_path, capsys, monkeypatch):
+    run([], repo, config_path, fake())  # fills the cache through the fake provider
+    capsys.readouterr()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    assert main(["review", "--repo", str(repo), "--base", "main", "--config", config_path]) == 0
+
+    out = capsys.readouterr().out
+    assert "a.py:2" in out and "(cached)" in out
+
+
+def test_a_cache_miss_without_an_api_key_exits_2_naming_the_variable(repo, config_path, capsys, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert main(["review", "--repo", str(repo), "--base", "main", "--config", config_path]) == 2
+    assert "OPENAI_API_KEY" in capsys.readouterr().err

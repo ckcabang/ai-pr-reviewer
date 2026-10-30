@@ -69,7 +69,7 @@ def evaluate(
     if not prs:
         raise ValueError("no dataset PRs to evaluate")
     prs.sort(key=lambda p: p.id)
-    provider = build_provider(config, use_cache=False, inner=provider)  # cache off, always
+    provider = build_provider(config, use_cache=False, inner=provider, lazy=False)  # cache off; key needed up front
     started = time.perf_counter()
 
     materialized: list[Materialized] = []
