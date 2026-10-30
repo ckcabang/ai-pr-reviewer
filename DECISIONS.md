@@ -92,3 +92,9 @@ The diff in the prompt carries a gutter with new-side line numbers (deleted line
 
 ## D26: Until triage exists, every finding is "review recommended"; no specialists left means exit 2
 The walking skeleton has no verifier or triage: kept findings get `verdict: keep` and `triage: review_recommended`. The triage ticket replaces that. If every specialist fails there is no review to show, so `review()` raises and the CLI exits 2 rather than printing a falsely clean review; partial failures are recorded in stats and the other specialists' findings survive.
+
+## D27: The verifier fails open, and judges what it can verify
+A verifier batch that errors (or a finding the verifier returns no verdict for) keeps its findings as proposed, with `verifier_reason` saying so and `stats.stages.verifier.status` set to `partial`/`failed` (shown in the Markdown footer). Losing a review because the second opinion was down is worse than showing unverified findings; triage's confidence threshold still applies. Its inputs are the finding text plus a numbered ±15-line window of the head file (added lines marked `+`), the team rules and the don't-flag list; it does not get the context bundle. A `duplicate_of` that is unknown, self-referential, points at a dropped finding, or is mutual (the more confident one survives) is ignored, so a model slip cannot erase a real finding.
+
+## D28: Triage details the spec left open
+Near-duplicates (same file and category, lines within 3) are collapsed greedily from the highest confidence down, so the survivor is the most confident, not the highest severity. Every dropped finding stays in the output with `triage_reason` (JSON includes them; Markdown does not). The cap counts only kept findings and is reported as `stats.stages.triage.cap_removed`; other drop counts are in `dropped_by_reason`. Verifier skipping (`review(..., verify=False)`) is the ablation switch: findings keep their own confidence and still pass through triage.
