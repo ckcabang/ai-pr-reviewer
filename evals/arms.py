@@ -6,8 +6,9 @@ arm, and an ablation is a function that calls `review` with a modified copy of `
 
 To add an arm, register it in `ARMS`:
 
-    ARMS["pipeline"] = Arm("pipeline", review, "context + specialists + verifier + triage")   # #12
     ARMS["pipeline_no_verifier"] = Arm("pipeline_no_verifier", my_ablation_fn, "...")          # #14
+
+`pipeline` (registered below) is `reviewer.pipeline.review` itself, the CLI's entry point (#12).
 
 Whatever an arm returns is scored as follows: findings whose triage is `dropped` are kept in
 the results file for debugging but are not judged; everything else is.
@@ -21,6 +22,7 @@ from reviewer.agents.baseline import review_baseline
 from reviewer.config import Config
 from reviewer.llm import Provider
 from reviewer.models import ReviewInput, ReviewResult
+from reviewer.pipeline import review
 
 ArmFn = Callable[..., ReviewResult]
 """Called as `fn(review_input, provider=provider, config=config)`."""
@@ -42,6 +44,8 @@ class Arm:
 
 ARMS: dict[str, Arm] = {
     "baseline": Arm("baseline", review_baseline, "one diff-only prompt, merged checklist, scored raw (D6, D7)"),
+    # The product itself: the same entry point the CLI calls (Seam 1), so the eval measures what ships.
+    "pipeline": Arm("pipeline", review, "context + three specialists + verifier + triage; non-dropped findings scored"),
 }
 
 

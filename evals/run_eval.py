@@ -224,6 +224,8 @@ def main(argv: list[str] | None = None, *, provider: Provider | None = None) -> 
 
 
 def _print_summary(results: dict) -> None:
+    from evals.scorecard import degraded_text
+
     def cell(a):
         return "n/a" if a is None else f"{a['mean']:.2f}" + ("" if a["std"] is None else f" ± {a['std']:.2f}")
 
@@ -235,6 +237,8 @@ def _print_summary(results: dict) -> None:
         if any(s["errors"].values()):
             print(f"  WARNING: {s['errors']['review']} review error(s), {s['errors']['judge']} judge error(s) "
                   f"were left out of the metrics")
+        if note := degraded_text(arm, s["degraded"]):
+            print(f"  WARNING: {note}")
     agreement = results["judge_agreement"]
     if agreement:
         print(f"judge agreement: {agreement['agree']}/{agreement['n']}")
