@@ -33,4 +33,4 @@ dev = [
 # importlib mode + pythonpath let the repo's tests and demo_service/tests share one run
 # without basename collisions; the service imports as `app`.
 addopts = "--import-mode=importlib"
-pythonpath = ["demo_service"]
+pythonpath = [".", "demo_service"]

@@ -1,0 +1,10 @@
+id: pr06
+title: Rename pricing helpers for clarity
+description: |
+  Renames the pricing helpers so the names say what they do. No behaviour change.
+
+  - `get_subtotal` -> `calculate_subtotal`
+  - `get_discount_percent` -> `lookup_discount_percent` (it is a database lookup)
+  - `get_order_total` -> `calculate_order_total`
+
+  All callers (orders, invoices, payments) and the pricing tests are updated.
