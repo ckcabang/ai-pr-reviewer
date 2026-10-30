@@ -69,5 +69,29 @@ The service is `demo_service/app/...` (imports as `app`) with its own tests in `
 ## D20: Dataset lives in `evals/dataset/`; one directory per PR, materialized into a real git repo
 Each dataset PR is `evals/dataset/prs/<id>_<slug>/{meta.yaml, change.patch, labels.yaml}`; the patch is paths relative to `demo_service/`. `evals.dataset.materialize(pr, dest)` copies `demo_service/` as the base commit on `main`, applies the patch and commits it on branch `<id>`. Commits use a fixed author and date, so SHAs are deterministic (same base SHA for every PR), which keeps cache keys and demo output stable. `evals/dataset/integrity.py` checks every PR (patch applies, every `app.*` module imports, anchors fall inside a hunk of a changed file, related locations exist, no hint words in title/description, and clean PRs keep the service tests green). Anchors must be inside a hunk (D2), not merely in the right file. pytest's `pythonpath` now includes the repo root so tests can import `evals`.
 
-## D21: Batch A `requires` values were re-judged against the real patches
+## D21: Smoke-test results: the GPT-6.1 models reject `temperature`, all accept JSON mode
+`scripts/smoke_api.py` (Oct 2026, personal key), probing each configured model with and without `response_format={"type": "json_object"}` and `temperature: 0`:
+- **`gpt-6.1-terra` (specialists, baseline) and `gpt-6.1-sol` (verifier):** JSON mode accepted; `temperature: 0` rejected with a 400 ("only the default (1) value is supported"). The provider therefore retries once without `temperature` and remembers that per model for the rest of the process.
+- **`gpt-4.1` (judge):** accepts both JSON mode and `temperature: 0`.
+- **`text-embedding-3-small`:** works, 1536 dimensions.
+- Per-model prices in `config.yaml` match OpenAI's pricing page (checked Oct 2026).
+
+Consequence: specialists and verifier sample at temperature 1, so two uncached runs of the same PR differ. That is what the eval's multiple runs and mean ± std are for, and why the demo replays from the cache (D18).
+
+## D22: The HTTP library is `httpx2`, not `httpx`
+`openai` 3.x is built on `httpx2`, and an `httpx` client cannot be handed to it (plain `httpx` is only a direct dependency for the demo service's test client). Our own HTTP code (provider, later the GitHub client) uses `httpx2` (declared as a direct dependency), and tests fake HTTP with `httpx2.MockTransport`. The plan's "httpx" means this.
+
+## D23: `Provider.chat_json` takes a `role`
+The plan's protocol has no `role`, but the fake provider must answer by role, not by prompt hash. Callers pass `role` (`correctness`, `security`, `standards`, `verifier`, `judge`, `baseline`); real providers ignore it. The cache key stays model + prompts + temperature, as specified.
+
+## D24: Config location and cache directory
+The default config is `config.yaml` at the root of the reviewer's own project (found from the package location, so it works through `uv run --project` from any directory). `--config FILE` overrides it. A relative `cache.dir` resolves against the config file's directory, never the reviewed repo, so reviewing a repo does not write into it. Unknown config keys are an error, to catch typos.
+
+## D25: Specialists see a line-numbered diff; anchors are checked in code
+The diff in the prompt carries a gutter with new-side line numbers (deleted lines have none), because models cannot reliably derive them from hunk headers. A finding whose file or line is not a commentable line of the diff is dropped and counted in `stats.specialists.<name>.dropped_invalid_anchor` (D2). A deleted line's "position" is the new-side number of the line now occupying that spot, i.e. the first line after the deleted run.
+
+## D26: Until triage exists, every finding is "review recommended"; no specialists left means exit 2
+The walking skeleton has no verifier or triage: kept findings get `verdict: keep` and `triage: review_recommended`. The triage ticket replaces that. If every specialist fails there is no review to show, so `review()` raises and the CLI exits 2 rather than printing a falsely clean review; partial failures are recorded in stats and the other specialists' findings survive.
+
+## D27: Batch A `requires` values were re-judged against the real patches
 Two labels differ from the plan table. pr04's Idempotency-Key removal is `rules` rather than `cross_file`: the removed header and `check_and_store` call are visible in the diff, and only rule R5 says they are mandatory. pr05's capture retry is `diff` rather than `cross_file`: the diff itself shows a retried `POST /charges` without a key (and removes the docstring saying why capture is never retried). pr04's R9 issue stays `cross_file` because the harm (which states may be refunded) is defined in `order_state.py`. pr05's swallowed error also makes the existing `test_failed_capture_returns_generic_error_and_frees_the_key` fail on the patched tree, as pr09's invoice test does; integrity only requires green tests for clean PRs.
