@@ -209,6 +209,8 @@ Everything is in `config.yaml`; the only environment input is the API key. The w
 
 ## Live demo script (5 to 7 minutes)
 
+Before the demo, run `scripts/demo.sh --verify`. It replays both demo PRs with no API key and prints `ok` only if every call comes from the cache. Any change to a prompt, a model, the context engine, `REVIEW.md` or a demo PR invalidates the cache. If it prints `STALE`, refill with `uv run --env-file .env scripts/demo.sh pr09` (and `pr06`), then verify again.
+
 1. The problem: generic, noisy AI review gets ignored. Big teams use pipelines, not prompts (Uber, Cloudflare, Atlassian).
 2. The diagram above, in one minute.
 3. `scripts/demo.sh pr09`: the cross-file catch, with evidence and triage. Then `scripts/demo.sh pr06`: a clean PR, and it stays quiet. Both replay from the cache once it is filled; each stage line says `(cached)`, and `--no-cache` runs them for real (about 20 s and 3 s).

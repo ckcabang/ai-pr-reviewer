@@ -331,7 +331,7 @@ def test_deletion_only_change_still_brings_in_its_function(build, config):
     head = {"app/refunds.py": REFUNDS_BASE.replace(
         "    if not check_and_store(key):\n        return None\n", "")}
     review_input = build(base={**BASE, "app/refunds.py": REFUNDS_BASE}, head=head)
-    assert not [l for l in review_input.diff.splitlines() if l.startswith("+") and not l.startswith("+++")]
+    assert not [line for line in review_input.diff.splitlines() if line.startswith("+") and not line.startswith("+++")]
 
     ctx = section(specialist_prompt(review_input, config), "context")
     assert "=== app/refunds.py:1-3 (changed function `refund`)" in ctx

@@ -4,13 +4,31 @@
 #   scripts/demo.sh pr09              # the cross-file catch (replays from the cache if filled)
 #   scripts/demo.sh pr06              # the clean PR (should be quiet)
 #   scripts/demo.sh pr09 --no-cache   # fresh, real API calls (anything after the PR id goes to `review`)
+#   scripts/demo.sh --verify          # pre-demo check: both demo PRs replay fully from the cache
 #
 # Needs OPENAI_API_KEY (or `uv run --env-file .env`) only for calls that are not in the cache: a
 # fully cached replay runs with no key at all. The review uses the project's config.yaml, so the
-# cache is <project>/.cache (D24).
+# cache is <project>/.cache (D24). Any change to a prompt, model, the context engine, REVIEW.md or
+# a demo PR invalidates the cache; --verify catches that, and a run with the key refills it.
 set -euo pipefail
-pr="${1:?usage: scripts/demo.sh pr09|pr06 [review args...]}"; shift || true
 root="$(cd "$(dirname "$0")/.." && pwd)"
+
+if [ "${1:-}" = "--verify" ]; then
+  status=0
+  for pr in pr09 pr06; do
+    # No key: a cache miss exits 2 instead of silently calling the API.
+    if out="$(env -u OPENAI_API_KEY "$0" "$pr" 2>&1)" \
+        && grep -q '^- Latency: .*(cached)$' <<<"$out" && ! grep -q 'FAILED' <<<"$out"; then
+      echo "ok    $pr  $(grep -m1 '^# AI Review' <<<"$out")"
+    else
+      echo "STALE $pr  (refill: uv run --env-file .env scripts/demo.sh $pr)"
+      status=1
+    fi
+  done
+  exit "$status"
+fi
+
+pr="${1:?usage: scripts/demo.sh pr09|pr06 [review args...] | --verify}"; shift || true
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 cd "$root"
 uv run python -m evals.dataset materialize "$pr" "$work/repo" >&2

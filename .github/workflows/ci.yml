@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main, poc-v1]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      # Tests build throwaway git repos; give git an identity for their commits.
+      - name: Configure git
+        run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@example.invalid"
+          git config --global init.defaultBranch main
+
+      - name: Install
+        run: uv sync --locked
+
+      - name: Lint
+        run: uv run ruff check
+
+      # Fully offline: providers are faked, so no API key is needed. Includes the prompt pins,
+      # which guard the committed eval results against unrecorded prompt changes.
+      - name: Test
+        run: uv run pytest
