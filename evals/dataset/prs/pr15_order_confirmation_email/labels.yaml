@@ -1,0 +1,25 @@
+issues:
+  - id: pr15-1
+    file: app/services/orders.py
+    line_hint: 23            # httpx.post(...) in send_confirmation
+    area: standards
+    severity: medium
+    rule_id: R4
+    requires: rules
+    description: >-
+      send_confirmation calls the email API directly with `httpx.post` from a service, with
+      `timeout=None`, instead of going through `clients/email_client.send`. R4 requires external
+      calls to go through `clients/` wrappers (timeouts, error mapping). Here a slow or hung mail
+      API blocks the order request indefinitely, and the wrapper's `EmailError` handling is
+      bypassed.
+  - id: pr15-2
+    file: app/services/orders.py
+    line_hint: 58            # send_confirmation(...) inside `with db.transaction()`
+    area: correctness
+    severity: medium
+    requires: diff
+    description: >-
+      The confirmation email is sent inside the `with db.transaction()` block, before the
+      transaction commits. If the commit (or anything after the call) fails, the order is rolled
+      back but the customer has already been told it was placed. The email should be sent after
+      the transaction block exits.
