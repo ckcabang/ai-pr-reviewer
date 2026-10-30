@@ -1,7 +1,7 @@
 [project]
 name = "ai-pr-reviewer"
 version = "0.1.0"
-description = "Add your description here"
+description = "Pipeline-based AI code reviewer: context, specialists, verifier, triage, measured against a single-prompt baseline."
 readme = "README.md"
 authors = [
     { name = "Clarence Cabang", email = "ckcabang@gmail.com" }
@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.162.0",
+    "httpx2>=2.14.0",
     "numpy>=2.2.6",
     "openai>=3.41.0",
     "pydantic>=2.14.2",
@@ -17,7 +18,10 @@ dependencies = [
 ]
 
 [project.scripts]
-ai-pr-reviewer = "ai_pr_reviewer:main"
+reviewer = "reviewer.cli:main"
+
+[tool.uv.build-backend]
+module-name = "reviewer"
 
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]
@@ -27,3 +31,6 @@ build-backend = "uv_build"
 dev = [
     "pytest>=9.2.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
