@@ -1,0 +1,29 @@
+[project]
+name = "ai-pr-reviewer"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Clarence Cabang", email = "ckcabang@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.162.0",
+    "numpy>=2.2.6",
+    "openai>=3.41.0",
+    "pydantic>=2.14.2",
+    "pyyaml>=6.0.3",
+    "uvicorn>=0.54.0",
+]
+
+[project.scripts]
+ai-pr-reviewer = "ai_pr_reviewer:main"
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
