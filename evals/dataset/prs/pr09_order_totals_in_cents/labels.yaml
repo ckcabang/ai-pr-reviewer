@@ -1,0 +1,15 @@
+issues:
+  - id: pr09-1
+    file: app/services/pricing.py
+    line_hint: 54            # the changed `return int(... * 100)` in get_order_total
+    area: correctness
+    severity: high
+    requires: cross_file
+    description: >-
+      get_order_total now returns integer cents, but the unchanged invoice code
+      (services/invoices.py build_invoice) still treats the value as Decimal dollars: amount_due and
+      display_total come out 100x too high (2165 cents is shown as $2,165.00 instead of $21.65).
+      Only the callers in orders.py and payments.py were converted back with cents_to_dollars.
+    related:
+      - file: app/services/invoices.py
+        line_hint: 13

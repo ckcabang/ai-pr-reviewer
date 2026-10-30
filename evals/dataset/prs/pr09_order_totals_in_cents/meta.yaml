@@ -1,0 +1,11 @@
+id: pr09
+title: Return order totals in cents
+description: |
+  `pricing.get_order_total` now returns the total as an integer number of cents instead of a
+  Decimal in dollars, so we can hand whole-cent amounts to the payment gateway without
+  re-quantizing.
+
+  - `get_order_total` computes subtotal, discount and tax as before and returns `int` cents.
+  - New `pricing.cents_to_dollars` helper for places that still want dollars.
+  - Order responses and payment capture convert back to dollars with the helper.
+  - Updated the `get_order_total` tests to expect cents.

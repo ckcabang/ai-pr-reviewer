@@ -66,7 +66,10 @@ The M7 dry-run fills the cache for pr09 and pr06. In the live demo, cached stats
 ## D19: Demo service lives at `demo_service/`; one pytest run covers it and the repo tests
 The service is `demo_service/app/...` (imports as `app`) with its own tests in `demo_service/tests/`, as the spec lays out. To avoid pytest collection clashes with the repo's `tests/` (same basenames such as `test_pricing.py`, two `conftest.py` files), `pyproject.toml` sets `addopts = "--import-mode=importlib"` and `pythonpath = ["demo_service"]`. `uv run pytest` runs both. The service tests use fixtures (not `import conftest`) for helpers, since importlib mode doesn't put test directories on `sys.path`. `httpx` was added as a dependency (the service's gateway/email clients use it, and FastAPI's `TestClient` needs it).
 
-## D20: Smoke-test results: the GPT-6.1 models reject `temperature`, all accept JSON mode
+## D20: Dataset lives in `evals/dataset/`; one directory per PR, materialized into a real git repo
+Each dataset PR is `evals/dataset/prs/<id>_<slug>/{meta.yaml, change.patch, labels.yaml}`; the patch is paths relative to `demo_service/`. `evals.dataset.materialize(pr, dest)` copies `demo_service/` as the base commit on `main`, applies the patch and commits it on branch `<id>`. Commits use a fixed author and date, so SHAs are deterministic (same base SHA for every PR), which keeps cache keys and demo output stable. `evals/dataset/integrity.py` checks every PR (patch applies, every `app.*` module imports, anchors fall inside a hunk of a changed file, related locations exist, no hint words in title/description, and clean PRs keep the service tests green). Anchors must be inside a hunk (D2), not merely in the right file. pytest's `pythonpath` now includes the repo root so tests can import `evals`.
+
+## D21: Smoke-test results: the GPT-6.1 models reject `temperature`, all accept JSON mode
 `scripts/smoke_api.py` (Oct 2026, personal key), probing each configured model with and without `response_format={"type": "json_object"}` and `temperature: 0`:
 - **`gpt-6.1-terra` (specialists, baseline) and `gpt-6.1-sol` (verifier):** JSON mode accepted; `temperature: 0` rejected with a 400 ("only the default (1) value is supported"). The provider therefore retries once without `temperature` and remembers that per model for the rest of the process.
 - **`gpt-4.1` (judge):** accepts both JSON mode and `temperature: 0`.
@@ -75,17 +78,17 @@ The service is `demo_service/app/...` (imports as `app`) with its own tests in `
 
 Consequence: specialists and verifier sample at temperature 1, so two uncached runs of the same PR differ. That is what the eval's multiple runs and mean ± std are for, and why the demo replays from the cache (D18).
 
-## D21: The HTTP library is `httpx2`, not `httpx`
+## D22: The HTTP library is `httpx2`, not `httpx`
 `openai` 3.x is built on `httpx2`, and an `httpx` client cannot be handed to it (plain `httpx` is only a direct dependency for the demo service's test client). Our own HTTP code (provider, later the GitHub client) uses `httpx2` (declared as a direct dependency), and tests fake HTTP with `httpx2.MockTransport`. The plan's "httpx" means this.
 
-## D22: `Provider.chat_json` takes a `role`
+## D23: `Provider.chat_json` takes a `role`
 The plan's protocol has no `role`, but the fake provider must answer by role, not by prompt hash. Callers pass `role` (`correctness`, `security`, `standards`, `verifier`, `judge`, `baseline`); real providers ignore it. The cache key stays model + prompts + temperature, as specified.
 
-## D23: Config location and cache directory
+## D24: Config location and cache directory
 The default config is `config.yaml` at the root of the reviewer's own project (found from the package location, so it works through `uv run --project` from any directory). `--config FILE` overrides it. A relative `cache.dir` resolves against the config file's directory, never the reviewed repo, so reviewing a repo does not write into it. Unknown config keys are an error, to catch typos.
 
-## D24: Specialists see a line-numbered diff; anchors are checked in code
+## D25: Specialists see a line-numbered diff; anchors are checked in code
 The diff in the prompt carries a gutter with new-side line numbers (deleted lines have none), because models cannot reliably derive them from hunk headers. A finding whose file or line is not a commentable line of the diff is dropped and counted in `stats.specialists.<name>.dropped_invalid_anchor` (D2). A deleted line's "position" is the new-side number of the line now occupying that spot, i.e. the first line after the deleted run.
 
-## D25: Until triage exists, every finding is "review recommended"; no specialists left means exit 2
+## D26: Until triage exists, every finding is "review recommended"; no specialists left means exit 2
 The walking skeleton has no verifier or triage: kept findings get `verdict: keep` and `triage: review_recommended`. The triage ticket replaces that. If every specialist fails there is no review to show, so `review()` raises and the CLI exits 2 rather than printing a falsely clean review; partial failures are recorded in stats and the other specialists' findings survive.

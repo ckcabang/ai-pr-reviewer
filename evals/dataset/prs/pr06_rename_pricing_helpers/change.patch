@@ -1,0 +1,122 @@
+diff --git a/app/routes/payments.py b/app/routes/payments.py
+index 280fb23..a65180a 100644
+--- a/app/routes/payments.py
++++ b/app/routes/payments.py
+@@ -35,7 +35,7 @@ def capture_payment(
+         raise HTTPException(status_code=409, detail="Order cannot be paid in its current state")
+ 
+     try:
+-        amount = pricing.get_order_total(order["id"])
++        amount = pricing.calculate_order_total(order["id"])
+         logger.info("capturing payment %s", redact({"order_id": order["id"], "amount": str(amount)}))
+         charge = payment_gateway.capture(order["id"], amount)
+         with db.transaction():
+diff --git a/app/services/invoices.py b/app/services/invoices.py
+index dacdcac..0ac7caa 100644
+--- a/app/services/invoices.py
++++ b/app/services/invoices.py
+@@ -1,4 +1,4 @@
+-"""Invoices. The amount due comes from `pricing.get_order_total()` (Decimal dollars)."""
++"""Invoices. The amount due comes from `pricing.calculate_order_total()` (Decimal dollars)."""
+ from __future__ import annotations
+ 
+ from app.models import Invoice
+@@ -10,12 +10,12 @@ def format_dollars(amount) -> str:
+ 
+ 
+ def build_invoice(order_id: int) -> Invoice:
+-    amount_due = pricing.get_order_total(order_id)
++    amount_due = pricing.calculate_order_total(order_id)
+     lines = [
+         f"{item.quantity} x {item.sku} @ {format_dollars(item.unit_price)}"
+         for item in orders.get_items(order_id)
+     ]
+-    lines.append(f"Subtotal before discount and tax: {format_dollars(pricing.get_subtotal(order_id))}")
++    lines.append(f"Subtotal before discount and tax: {format_dollars(pricing.calculate_subtotal(order_id))}")
+     return Invoice(
+         order_id=order_id,
+         lines=lines,
+diff --git a/app/services/orders.py b/app/services/orders.py
+index fd82184..fa7ac92 100644
+--- a/app/services/orders.py
++++ b/app/services/orders.py
+@@ -13,7 +13,7 @@ def create_order(user_id: int, payload: OrderCreate) -> int:
+     """Create a pending order and reserve its stock in one transaction."""
+     with db.transaction():
+         if payload.discount_code:
+-            pricing.get_discount_percent(payload.discount_code)  # fail early on unknown codes
++            pricing.lookup_discount_percent(payload.discount_code)  # fail early on unknown codes
+         prices = {}
+         for item in payload.items:
+             stocked = inventory.get_item(item.sku)
+@@ -60,6 +60,6 @@ def to_out(order: dict) -> OrderOut:
+         id=order["id"],
+         user_id=order["user_id"],
+         status=order["status"],
+-        total=pricing.get_order_total(order["id"]),
++        total=pricing.calculate_order_total(order["id"]),
+         items=get_items(order["id"]),
+     )
+diff --git a/app/services/pricing.py b/app/services/pricing.py
+index 886f263..e2156f9 100644
+--- a/app/services/pricing.py
++++ b/app/services/pricing.py
+@@ -14,14 +14,14 @@ class UnknownDiscountCode(ValueError):
+     pass
+ 
+ 
+-def get_subtotal(order_id: int) -> Decimal:
++def calculate_subtotal(order_id: int) -> Decimal:
+     rows = db.execute(
+         "SELECT quantity, unit_price FROM order_items WHERE order_id = ?", (order_id,)
+     ).all()
+     return to_money(sum((Decimal(r["unit_price"]) * r["quantity"] for r in rows), Decimal("0")))
+ 
+ 
+-def get_discount_percent(code: str) -> Decimal:
++def lookup_discount_percent(code: str) -> Decimal:
+     row = db.execute("SELECT percent_off FROM discount_codes WHERE code = ?", (code,)).one()
+     if row is None:
+         raise UnknownDiscountCode(code)
+@@ -39,12 +39,12 @@ def calculate_tax(amount: Decimal, rate: Decimal | None = None) -> Decimal:
+     return to_money(amount * rate)
+ 
+ 
+-def get_order_total(order_id: int) -> Decimal:
++def calculate_order_total(order_id: int) -> Decimal:
+     """Total owed for an order in dollars: subtotal, less any discount code, plus tax."""
+     order = db.execute("SELECT discount_code FROM orders WHERE id = ?", (order_id,)).one()
+     if order is None:
+         raise LookupError(f"order {order_id} not found")
+-    amount = get_subtotal(order_id)
++    amount = calculate_subtotal(order_id)
+     if order["discount_code"]:
+-        amount = apply_discount(amount, get_discount_percent(order["discount_code"]))
++        amount = apply_discount(amount, lookup_discount_percent(order["discount_code"]))
+     return to_money(amount + calculate_tax(amount))
+diff --git a/tests/test_pricing.py b/tests/test_pricing.py
+index e7f4281..7301813 100644
+--- a/tests/test_pricing.py
++++ b/tests/test_pricing.py
+@@ -40,7 +40,7 @@ def test_order_total_is_decimal_dollars_with_tax(monkeypatch):
+     _set_tax_rate(monkeypatch, "0.10")
+     _seed_order()
+     # subtotal 25.50 + 10% tax 2.55
+-    assert pricing.get_order_total(1) == Decimal("28.05")
++    assert pricing.calculate_order_total(1) == Decimal("28.05")
+ 
+ 
+ def test_order_total_applies_discount_code_before_tax(monkeypatch):
+@@ -48,10 +48,10 @@ def test_order_total_applies_discount_code_before_tax(monkeypatch):
+     db.execute("INSERT INTO discount_codes (code, percent_off) VALUES ('SAVE20', '20')")
+     _seed_order("SAVE20")
+     # 25.50 - 20% = 20.40, + 10% tax 2.04
+-    assert pricing.get_order_total(1) == Decimal("22.44")
++    assert pricing.calculate_order_total(1) == Decimal("22.44")
+ 
+ 
+ def test_unknown_discount_code_is_rejected():
+     _seed_order("NOPE")
+     with pytest.raises(pricing.UnknownDiscountCode):
+-        pricing.get_order_total(1)
++        pricing.calculate_order_total(1)
