@@ -3,7 +3,7 @@
     uv run python -m evals.scorecard --from evals/out/<timestamp>/
 
 One page, inline CSS and SVG only (no CDN, no script, no external request), readable at a glance:
-at-a-glance tiles, headline table, grouped P/R/F1 chart, recall by required context, per-PR table,
+at-a-glance tiles, headline table, grouped P/R/F1 chart, recall by required context and by area, per-PR table,
 two pipeline example findings next to what the baseline said, and a methodology note with the
 limitations. The only input is the `results.json` documented in `evals.run_eval.build_results`;
 every metric is re-derived from the raw records with `evals.metrics.summarize` (2 to 4 arms; more
@@ -17,7 +17,7 @@ import sys
 from html import escape
 from pathlib import Path
 
-from evals.metrics import REQUIRES, summarize
+from evals.metrics import AREAS, REQUIRES, summarize
 
 _CSS = """
 :root{--bg:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#6b6963;--grid:#e1e0d9;--axis:#c3c2b7;
@@ -264,20 +264,37 @@ def _chart(summary: dict, arms: list[str]) -> str:
 _CONTEXT_NOTE = {"diff": "diff only", "rules": "needs the repo's review rules", "cross_file": "needs other files"}
 
 
-def _context(summary: dict, results: dict, arms: list[str]) -> str:
-    counts = {k: sum(i["requires"] == k for d in results["dataset"] for i in d["expected_issues"]) for k in REQUIRES}
-    groups = [(f"{k.replace('_', '-')} ({counts[k]} issues)", [summary[a]["recall_by_requires"][k] for a in arms])
-              for k in REQUIRES]
-    head = "".join(f"<th>{_e(k.replace('_', '-'))}</th>" for k in REQUIRES)
+def _recall_by(summary: dict, results: dict, arms: list[str], *, dim: str, summary_key: str, keys: tuple[str, ...],
+               section_id: str, title: str, intro: str, aria: str) -> str:
+    """A recall-by-category section: grouped bars plus a table, one column per category."""
+    counts = {k: sum(i[dim] == k for d in results["dataset"] for i in d["expected_issues"]) for k in keys}
+    groups = [(f"{k.replace('_', '-')} ({counts[k]} issues)", [summary[a][summary_key][k] for a in arms])
+              for k in keys]
+    head = "".join(f"<th>{_e(k.replace('_', '-'))}</th>" for k in keys)
     rows = "".join(f'<tr><td><span class="swatch {_cls(i)}"></span>{_e(_label(a))}</td>'
-                   + "".join(f"<td>{_e(_pct(summary[a]['recall_by_requires'][k]))}</td>" for k in REQUIRES) + "</tr>"
+                   + "".join(f"<td>{_e(_pct(summary[a][summary_key][k]))}</td>" for k in keys) + "</tr>"
                    for i, a in enumerate(arms))
-    legend = "; ".join(f"<b>{_e(k.replace('_', '-'))}</b>: {_e(_CONTEXT_NOTE[k])}" for k in REQUIRES)
-    return ('<section id="context"><h2>Recall by context the issue needs</h2>'
-            f'<p class="sub">Each planted issue is tagged with the least context that makes it findable. {legend}.</p>'
-            + _legend(arms) + _grouped_bars(groups, arms, pct=True, aria="Recall by required context per arm")
+    return (f'<section id="{section_id}"><h2>{_e(title)}</h2><p class="sub">{intro}</p>'
+            + _legend(arms) + _grouped_bars(groups, arms, pct=True, aria=aria)
             + f'<div class="scroll"><table><thead><tr><th>Arm</th>{head}</tr></thead><tbody>{rows}</tbody></table></div>'
             "</section>")
+
+
+def _context(summary: dict, results: dict, arms: list[str]) -> str:
+    legend = "; ".join(f"<b>{_e(k.replace('_', '-'))}</b>: {_e(_CONTEXT_NOTE[k])}" for k in REQUIRES)
+    return _recall_by(
+        summary, results, arms, dim="requires", summary_key="recall_by_requires", keys=REQUIRES,
+        section_id="context", title="Recall by context the issue needs",
+        intro=f"Each planted issue is tagged with the least context that makes it findable. {legend}.",
+        aria="Recall by required context per arm")
+
+
+def _area(summary: dict, results: dict, arms: list[str]) -> str:
+    return _recall_by(
+        summary, results, arms, dim="area", summary_key="recall_by_area", keys=AREAS,
+        section_id="area", title="Recall by area",
+        intro="Each planted issue belongs to one area: correctness, security, or team standards (rules).",
+        aria="Recall by area per arm")
 
 
 def _mark(matched: int, runs: int) -> str:
@@ -494,7 +511,7 @@ def render_html(results: dict) -> str:
         f'{_plural(len(results["dataset"]), "PR")} ({sum(d["is_clean"] for d in results["dataset"])} clean) · '
         f'{_e(results["created_at"][:10])}</p>{warnings}',
         _glance(summary, arms), _headline(summary, arms), _chart(summary, arms),
-        _context(summary, results, arms), _per_pr(summary, results, arms),
+        _context(summary, results, arms), _area(summary, results, arms), _per_pr(summary, results, arms),
         _examples(summary, results, arms), _method(results, summary, arms),
     ])
     return ("<!doctype html><html lang='en'><head><meta charset='utf-8'>"

@@ -87,7 +87,7 @@ def text(html: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html))
 
 
-SECTIONS = ["headline", "chart", "context", "per-pr", "examples", "method"]
+SECTIONS = ["headline", "chart", "context", "area", "per-pr", "examples", "method"]
 
 
 @pytest.mark.parametrize("arms", [("baseline", "pipeline"),
@@ -97,9 +97,9 @@ def test_every_section_renders_for_two_to_four_arms(arms):
     html = render_html(make_results(arms))
     for sid in SECTIONS:
         body = section(html, sid)
-        for arm in arms if sid in ("headline", "chart", "context", "per-pr") else ():
+        for arm in arms if sid in ("headline", "chart", "context", "area", "per-pr") else ():
             assert arm in body, f"{arm} missing from {sid}"
-    assert html.count("<svg") >= 2  # P/R/F1 chart and recall-by-context chart
+    assert html.count("<svg") >= 3  # P/R/F1, recall-by-context and recall-by-area charts
 
 
 def test_page_is_self_contained():
@@ -131,6 +131,16 @@ def test_recall_by_context_covers_every_required_context_and_arm():
     for ctx in ("diff", "rules", "cross_file"):
         assert ctx in body or ctx.replace("_", "-") in body or ctx.replace("_", " ") in body
     assert "100%" in body and "0%" in body  # pipeline gets cross-file in 1 of 2 runs, baseline never
+
+
+def test_recall_by_area_covers_every_area_and_arm_with_issue_counts():
+    body = section(render_html(make_results()), "area")
+    t = text(body)
+    for area, n in (("correctness", 2), ("security", 0), ("standards", 1)):
+        assert f"{area} ({n} issues)" in t
+    # standards (prB-1): baseline never finds it, pipeline finds it in both runs; security has no issues
+    assert "100%" in t and "0%" in t and "n/a" in t
+    assert body.count("<svg") == 1 and "baseline" in t and "pipeline" in t
 
 
 def test_per_pr_table_marks_each_expected_issue_found_or_missed_per_arm():
